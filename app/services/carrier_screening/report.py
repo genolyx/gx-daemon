@@ -16,6 +16,7 @@ report.json 구조:
     - partner: 파트너 정보 + findings[] (couples 템플릿)
     - findings: couples 전용, primary+partner 병합 (carrier_couples_*.html 상세 해석)
     - genes_evaluated_count
+    - interpretation_genes: HGNC symbols from WES panel + extras (for PDF gene list; may be empty)
     - carrier_status, confirmed_variants, disease_groups, qc_summary, reviewer
     - dark_genes (optional): report_detailed_html (+ error-only report_summary) from result.json for PDF (approved detailed sections only; Overview/QC blocks omitted)
     - pgx (optional): PharmCAT pgx_summary.txt + pgx_meta.json from pipeline ``pgx/`` → summary_for_pdf_html for PDF
@@ -31,6 +32,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from zoneinfo import ZoneInfo
 
 from ...datetime_kst import now_kst_date_iso, now_kst_iso
+from .review import atomic_write_json_file
 
 logger = logging.getLogger(__name__)
 
@@ -957,11 +959,40 @@ def generate_report_json(
             or "",
         )
 
+    from ..wes_panels import interpretation_genes_for_pdf
+
+    interp_genes = interpretation_genes_for_pdf(
+        order_params if isinstance(order_params, dict) else None
+    )
+
     genes_n = order_flat.get("genes_evaluated_count")
     try:
         genes_evaluated_count = int(genes_n) if genes_n is not None and str(genes_n).strip() != "" else 302
     except (TypeError, ValueError):
         genes_evaluated_count = 302
+
+    if interp_genes:
+        genes_evaluated_count = len(interp_genes)
+
+    def _include_pgx_on_pdf(v: Any) -> bool:
+        """Proactive (and other) PDFs: omit PharmCAT/APOE blocks when explicitly false."""
+        if v is None:
+            return True
+        if isinstance(v, bool):
+            return v
+        s = str(v).strip().lower()
+        if s in ("0", "false", "no"):
+            return False
+        return True
+
+    def _order_apoe_genotyping_requested(v: Any) -> bool:
+        """True when submit-time APOE tag-SNP option was enabled (params.include_apoe_pgx)."""
+        if v is None:
+            return False
+        if isinstance(v, bool):
+            return v
+        s = str(v).strip().lower()
+        return s in ("1", "true", "yes", "on")
 
     report_metadata = {
         "order_id": order_id,
@@ -976,6 +1007,12 @@ def generate_report_json(
         or order_flat.get("hospital")
         or "",
         "doctor": order_flat.get("doctor") or "",
+        # Proactive: PharmCAT PDF block (separate from APOE tag SNPs)
+        "include_pgx": _include_pgx_on_pdf(order_flat.get("include_pgx")),
+        # Proactive: APOE ε2/ε3/ε4 PDF block when order checked APOE genotype tag SNPs at submit
+        "include_apoe_on_proactive_pdf": _order_apoe_genotyping_requested(
+            order_flat.get("include_apoe_pgx")
+        ),
     }
 
     report: Dict[str, Any] = {
@@ -991,6 +1028,9 @@ def generate_report_json(
         "partner": partner_out,
 
         "genes_evaluated_count": genes_evaluated_count,
+
+        # Panel gene list for PDF «Genes Evaluated» (empty if not resolvable from order / catalog)
+        "interpretation_genes": interp_genes,
 
         # 캐리어 상태 요약
         "carrier_status": carrier_status,
@@ -1042,8 +1082,7 @@ def generate_report_json(
     )
 
     output_path = os.path.join(output_dir, "report.json")
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(report, f, ensure_ascii=False, indent=2, default=str)
+    atomic_write_json_file(output_path, report)
 
     logger.info(
         f"Generated report.json: {output_path} "

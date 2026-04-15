@@ -422,22 +422,29 @@ async def generate_report(order_id: str, req: ReportGenerateRequest = Body(...))
             partner_info=req.partner_info,
             languages=req.languages or settings.report_language_list,
         )
-
-        if qm.store:
-            ingest_report_json_from_disk(qm.store, job)
-
-        await qm.mark_report_ready(order_id)
-
-        return ReportGenerateResponse(
-            status="success",
-            order_id=order_id,
-            service_code=job.service_code,
-            report_files=report_files,
-            message="Report generated successfully",
-        )
     except Exception as e:
-        logger.error(f"Report generation failed for {order_id}: {e}", exc_info=True)
-        raise HTTPException(500, f"Report generation failed: {e}")
+        logger.exception("Report generation raised for order %s", order_id)
+        msg = str(e).strip() or repr(e)
+        raise HTTPException(status_code=500, detail=msg[:8000]) from e
+
+    if not report_files:
+        raise HTTPException(
+            status_code=500,
+            detail="Report generation failed (plugin returned false — check daemon logs).",
+        )
+
+    if qm.store:
+        ingest_report_json_from_disk(qm.store, job)
+
+    await qm.mark_report_ready(order_id)
+
+    return ReportGenerateResponse(
+        status="success",
+        order_id=order_id,
+        service_code=job.service_code,
+        report_files=report_files,
+        message="Report generated successfully",
+    )
 
 
 @app.post("/analysis/order/{order_id}/report")
@@ -529,9 +536,12 @@ async def save_pgx_review(order_id: str, req: PgxReviewRequest = Body(...)):
         raise HTTPException(404, "result.json not found in store")
 
     pgx = result_data.get("pgx") or {}
+    prev_pr = pgx.get("portal_review") if isinstance(pgx.get("portal_review"), dict) else {}
     pgx["portal_review"] = {
-        "reviewer_notes": req.reviewer_notes,
-        "reviewed": req.reviewed,
+        **prev_pr,
+        "reviewer_notes": (req.reviewer_notes or "")[:16000],
+        "reviewed": bool(req.reviewed),
+        "include_apoe_proactive_pdf": bool(req.include_apoe_proactive_pdf),
     }
 
     gene_results = pgx.get("gene_results") or []
@@ -548,7 +558,9 @@ async def save_pgx_review(order_id: str, req: PgxReviewRequest = Body(...)):
     for cr in custom_results:
         key = (cr.get("gene", ""), cr.get("rsid", ""))
         if key in custom_map:
-            cr["reviewer_confirmed"] = custom_map[key].reviewer_confirmed
+            u = custom_map[key]
+            cr["reviewer_confirmed"] = bool(u.reviewer_confirmed)
+            cr["reviewer_comment"] = (u.reviewer_comment or "")[:4000]
 
     pgx["gene_results"] = gene_results
     pgx["custom_gene_results"] = custom_results
@@ -686,9 +698,17 @@ async def reprocess_results(order_id: str):
     try:
         ok = await plugin.process_results(job)
         if not ok:
-            raise RuntimeError("process_results returned False")
+            hint = (getattr(job, "error_log", None) or "").strip()
+            detail = (
+                f"process_results failed: {hint}"
+                if hint
+                else "process_results failed — see daemon logs"
+            )
+            raise HTTPException(status_code=500, detail=detail)
         await qm.finalize_reprocess_results(job)
         return {"status": "ok", "order_id": order_id, "message": "Results reprocessed"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Reprocess failed for {order_id}: {e}", exc_info=True)
         raise HTTPException(500, str(e))

@@ -242,8 +242,13 @@
 </div>
 
 {% set drug_recs = data.pgx.drug_recommendations if data.pgx and data.pgx.drug_recommendations else [] %}
-{% if actionable | length > 0 and drug_recs | length > 0 %}
+{% set custom_results = data.pgx.custom_gene_results if data.pgx and data.pgx.custom_gene_results else [] %}
+{% set custom_variants = custom_results | selectattr('is_variant') | list if custom_results else [] %}
+{% set _pgx_show_drugs = actionable | length > 0 and drug_recs | length > 0 %}
+{% set _pgx_show_custom = custom_results | length > 0 %}
+{% if _pgx_show_drugs or _pgx_show_custom %}
 <div class="page-break"></div>
+{% if _pgx_show_drugs %}
 <h2>약물 처방 권고</h2>
 <p class="text-muted" style="font-size:8pt;margin:6px 0 12px;">CPIC / DPWG 임상 지침에 따른 조치 필요 유전자 약물 권고.</p>
 <table class="drug-rec-table">
@@ -269,12 +274,8 @@
     </tbody>
 </table>
 {% endif %}
-
-{% set custom_results = data.pgx.custom_gene_results if data.pgx and data.pgx.custom_gene_results else [] %}
-{% set custom_variants = custom_results | selectattr('is_variant') | list if custom_results else [] %}
-{% if custom_results | length > 0 %}
-<div class="page-break"></div>
-<h2>확장 PGx 패널 — 큐레이션 변이 유전자형 분석</h2>
+{% if _pgx_show_custom %}
+<h2{% if _pgx_show_drugs %} style="margin-top:28px;"{% endif %}>확장 PGx 패널 — 큐레이션 변이 유전자형 분석</h2>
 <p class="text-muted" style="font-size:8pt;margin:6px 0 8px;">
     PharmCAT (CPIC/DPWG) 분석 외 추가 약물유전체 마커.
     {% if custom_variants | length > 0 %}{{ custom_variants | length }}개 변이 검출.{% else %}변이 미검출; 모든 위치 동형접합 참조형.{% endif %}
@@ -328,13 +329,14 @@
     </tbody>
 </table>
 {% endif %}
+{% endif %}
 
 {% set evaluated = data.pgx.genes_evaluated if data.pgx and data.pgx.genes_evaluated else [] %}
 {% if evaluated | length > 0 %}
 <div style="page-break-before:always;"></div>
 <h2 style="font-size:11pt;font-weight:500;color:#0f172a;border-bottom:1px solid #e2e8f0;padding-bottom:4px;text-transform:uppercase;margin-top:25px;">분석 대상 유전자</h2>
 <p style="font-size:8pt;color:#334155;margin:2px 0 8px;text-align:justify;line-height:1.3;">
-    본 약물유전체 패널은 {{ evaluated | length }}개 유전자의 임상적으로 관련된 약물유전체 변이를 분석하였습니다.
+    본 보고서 해석 범위는 <strong>{{ data.genes_evaluated_count }}</strong>개 유전자이며, 아래에는 분석 결과가 있는 <strong>{{ evaluated | length }}</strong>개 유전자 기호가 나열됩니다. PharmCAT(CPIC/DPWG) 및/또는 Curated(ClinPGx) 유전자형 분석을 포함합니다.
     유전자는 PharmCAT (CPIC/DPWG 스타 대립유전자 분석) 및/또는 큐레이션된 변이 유전형 분석 (ClinPGx)을 통해 검사되었습니다.
 </p>
 <div style="font-size:8pt;color:#94a3b8;margin-top:10px;line-height:1.8;text-align:justify;">

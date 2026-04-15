@@ -270,16 +270,26 @@ class PgxGeneReviewRow(BaseModel):
 
 
 class PgxCustomGeneReviewRow(BaseModel):
+    """Per-variant review row for extended panel ``pgx.custom_gene_results[]`` (e.g. APOE rs429358 / rs7412)."""
+
     gene: str = Field(..., min_length=1, max_length=64)
     rsid: str = Field(..., min_length=1, max_length=32)
     reviewer_confirmed: bool = False
+    reviewer_comment: str = Field(default="", max_length=4000)
 
 
 class PgxReviewRequest(BaseModel):
     reviewer_notes: str = Field(default="", max_length=16000)
     reviewed: bool = Field(default=False)
     gene_reviews: List[PgxGeneReviewRow] = Field(default_factory=list)
-    custom_gene_reviews: List[PgxCustomGeneReviewRow] = Field(default_factory=list)
+    custom_gene_reviews: List[PgxCustomGeneReviewRow] = Field(
+        default_factory=list,
+        description="Updates reviewer_confirmed / reviewer_comment for matching gene+rsid in pgx.custom_gene_results",
+    )
+    include_apoe_proactive_pdf: bool = Field(
+        default=False,
+        description="Include APOE ε2/ε3/ε4 proactive summary block in customer PDF (proactive health orders)",
+    )
 
 
 class WesPanelCustomSave(BaseModel):
