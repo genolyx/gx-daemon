@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+        <style>
+            /* PDF Page Setup */
+            @page {
+                size: Letter;
+                margin: 0.6in 0.5in 1in 0.5in;
+
+                @top-right { content: element(headerContent); }
+                @bottom-left { content: element(footerContent); }
+                @bottom-right {
+                    content: "Page " counter(page) " of " counter(pages);
+                    font-family: 'Helvetica Neue', Arial, sans-serif;
+                    font-size: 8pt;
+                    color: #94a3b8;
+                }
+            }
+
+            @page :first { @top-right { content: none; } }
+
+            body {
+                font-family: 'Helvetica Neue', Helvetica, Arial, 'Noto Sans SC', sans-serif;
+                line-height: 1.3;
+                color: #334155;
+                margin: 0;
+            }
+
+            #header-content {
+                position: running(headerContent);
+                font-size: 8pt;
+                color: #64748b;
+                text-align: right;
+            }
+
+            #footer-content {
+                position: running(footerContent);
+                width: 100%;
+                font-size: 8pt;
+                color: #64748b;
+                line-height: 1.3;
+                border-top: 1px solid #cbd5e1;
+                padding-top: 8px;
+            }
+
+            .new-page { page-break-before: always; }
+
+            /* Branding Header */
+            .brand-header {
+                border-bottom: 1.5px solid #3b82f6;
+                padding-bottom: 8px;
+                margin-bottom: 25px;
+                display: block;
+                width: 100%;
+                clear: both;
+                overflow: hidden;
+            }
+
+            .brand-name {
+                float: left;
+                font-size: 18pt;
+                font-weight: 500;
+                color: #0f172a;
+                letter-spacing: -0.01em;
+                white-space: nowrap;
+                line-height: 40px;
+            }
+
+            .logo-placeholder {
+                float: right;
+                width: 140px;
+                height: 40px;
+                border: 1px dashed #cbd5e1;
+                text-align: center;
+                line-height: 40px;
+                font-size: 6.5pt;
+                color: #94a3b8;
+                text-transform: uppercase;
+            }
+
+            /* INLINE COMPACT PATIENT INFO TABLE */
+            .info-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 35px;
+                table-layout: fixed;
+                clear: both;
+            }
+            .info-table td {
+                padding: 4px 0;
+                vertical-align: middle;
+                border-bottom: 1px solid #f1f5f9;
+                font-size: 7.5pt;
+            }
+            .label {
+                display: inline;
+                font-size: 7.5pt;
+                color: #64748b;
+                text-transform: uppercase;
+                font-weight: 500;
+                margin-right: 4px;
+            }
+            .value { display: inline; color: #1e293b; }
+            .value-bold { display: inline; font-weight: 500; color: #0f172a; }
+
+            /* Results Banners */
+            .banner {
+                padding: 12px 15px;
+                border-radius: 4px;
+                margin-top: 10px;
+                margin-bottom: 40px;
+            }
+            .banner-actionable { background-color: #fffbeb; color: #92400e; border-left: 4px solid #d97706; }
+            .banner-normal { background-color: #f0fdf4; color: #15803d; border-left: 4px solid #15803d; }
+            .status-text { font-size: 12pt; font-weight: 500; margin: 0; }
+            .banner-desc { margin: 4px 0 0 0; font-size: 8.5pt; color: #334155; }
+
+            /* PGx Results Table */
+            .summary-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 25px;
+            }
+            .summary-table th {
+                text-align: left;
+                font-size: 7pt;
+                color: #64748b;
+                border-bottom: 1.5px solid #cbd5e1;
+                padding: 4px 4px;
+                text-transform: uppercase;
+                font-weight: 500;
+            }
+            .summary-table td {
+                padding: 6px 4px;
+                border-bottom: 1px solid #f1f5f9;
+                font-size: 7.5pt;
+                vertical-align: top;
+            }
+
+            .badge-actionable {
+                display: inline-block;
+                background-color: #fef3c7;
+                color: #92400e;
+                font-size: 7pt;
+                font-weight: 600;
+                padding: 1px 6px;
+                border-radius: 3px;
+            }
+            .badge-normal {
+                display: inline-block;
+                background-color: #f0fdf4;
+                color: #15803d;
+                font-size: 7pt;
+                font-weight: 500;
+                padding: 1px 6px;
+                border-radius: 3px;
+            }
+
+            .clinical-statement {
+                font-size: 8pt;
+                color: #64748b;
+                line-height: 1.4;
+                text-align: justify;
+                margin-bottom: 20px;
+                background: #f8fafc;
+                padding: 10px;
+                border-radius: 4px;
+            }
+
+            .section-title {
+                margin-top: 25px;
+                font-size: 11pt;
+                font-weight: 500;
+                color: #0f172a;
+                border-bottom: 1px solid #e2e8f0;
+                padding-bottom: 4px;
+                text-transform: uppercase;
+            }
+
+            .detail-text {
+                font-size: 8pt;
+                color: #334155;
+                margin: 2px 0 0 0;
+                text-align: justify;
+                line-height: 1.3;
+            }
+
+            .pgx-summary-block {
+                white-space: pre-wrap;
+                font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+                font-size: 8pt;
+                line-height: 1.35;
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                padding: 12px;
+                background: #f8fafc;
+                margin-top: 10px;
+            }
+
+            /* Drug Recommendations */
+            .drug-rec-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 20px;
+            }
+            .drug-rec-table th {
+                text-align: left;
+                font-size: 7pt;
+                color: #64748b;
+                border-bottom: 1.5px solid #cbd5e1;
+                padding: 4px 4px;
+                font-weight: 500;
+            }
+            .drug-rec-table td {
+                padding: 6px 4px;
+                border-bottom: 1px solid #f1f5f9;
+                font-size: 7.5pt;
+                vertical-align: top;
+            }
+            .drug-name { font-weight: 600; text-transform: capitalize; }
+            .rec-text { font-size: 7pt; line-height: 1.3; color: #334155; }
+
+            .badge-variant {
+                display: inline-block;
+                background-color: #fef3c7;
+                color: #92400e;
+                font-size: 7pt;
+                font-weight: 600;
+                padding: 1px 6px;
+                border-radius: 3px;
+            }
+            .badge-ref {
+                display: inline-block;
+                background-color: #f1f5f9;
+                color: #64748b;
+                font-size: 7pt;
+                font-weight: 500;
+                padding: 1px 6px;
+                border-radius: 3px;
+            }
+
+            .director-section {
+                margin-top: 50px;
+                padding-top: 10px;
+                border-top: 1px solid #e2e8f0;
+                page-break-inside: avoid;
+            }
+        </style>
+</head>
+<body>
+
+    <div id="header-content">
+        {{ data.primary_patient.name }} | 訂單編號: {{ data.report_metadata.order_id }}
+    </div>
+
+    <div id="footer-content">
+        <strong>Genolyx Diagnostics</strong> | 1400 16th Street, San Francisco, CA 94103<br>
+        clientservices@genolyx.com | 800.436.3037 | &copy; 2025 Genolyx Corporation
+    </div>
+
+    <div class="brand-header">
+        <div class="brand-name">藥物基因體學 (PGx)</div>
+        <div class="logo-placeholder"><span>徽標佔位符</span></div>
+    </div>
+
+    <table class="info-table">
+        <tr>
+            <td><span class="label">患者姓名:</span> <span class="value">{{ data.primary_patient.name }}</span></td>
+            <td><span class="label">醫療機構:</span> <span class="value">{{ data.report_metadata.hospital }}</span></td>
+        </tr>
+        <tr>
+            <td><span class="label">出生日期:</span> <span class="value">{{ data.primary_patient.dob }}</span></td>
+            <td><span class="label">臨床醫生:</span> <span class="value">{{ data.report_metadata.doctor }}</span></td>
+        </tr>
+        <tr>
+            <td><span class="label">性別:</span> <span class="value">{{ data.primary_patient.gender }}</span></td>
+            <td><span class="label">採樣日期:</span> <span class="value">{{ data.primary_patient.collection_date }}</span></td>
+        </tr>
+        <tr>
+            <td><span class="label">訂單編號:</span> <span class="value">{{ data.report_metadata.order_id }}</span></td>
+            <td><span class="label">報告日期:</span> <span class="value">{{ data.report_metadata.report_date }}</span></td>
+        </tr>
+        <tr>
+            <td><span class="label">樣本編號:</span> <span class="value">{{ data.primary_patient.sample_id }}</span></td>
+            <td><span class="label">報告狀態:</span> <span class="value" style="color:#64748b;">最終報告</span></td>
+        </tr>
+    </table>
+
+    {% set gene_results = data.pgx.gene_results if data.pgx and data.pgx.gene_results else [] %}
+    {% set actionable = gene_results | selectattr('category', 'equalto', 'actionable') | list %}
+
+    {% if actionable | length > 0 %}
+    <div class="banner banner-actionable">
+        <p class="status-text">需關注的藥物基因結果</p>
+        <p class="banner-desc">發現 {{ actionable | length }} 個基因具有需關注的藥物基因體學結果。可能需要調整藥物選擇或劑量。</p>
+    </div>
+    {% else %}
+    <div class="banner banner-normal">
+        <p class="status-text">無需關注的藥物基因結果</p>
+        <p class="banner-desc">未發現需要關注的藥物基因體學變異。所評估的基因適用標準藥物選擇和劑量。</p>
+    </div>
+    {% endif %}
+
+    <table class="summary-table">
+        <thead>
+            <tr>
+                <th width="12%">基因</th>
+                <th width="18%">二倍體型</th>
+                <th width="22%">表現型</th>
+                <th width="24%">等位基因功能</th>
+                <th width="11%">指南來源</th>
+                <th width="13%">類別</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% if gene_results | length > 0 %}
+                {% for row in gene_results %}
+                <tr>
+                    <td><span style="font-weight:600;">{{ row.gene }}</span></td>
+                    <td><span style="font-size:7pt;">{{ row.diplotype }}</span></td>
+                    <td>{{ row.phenotype }}</td>
+                    <td style="font-size:7pt;">
+                        {% set fns = [] %}
+                        {% if row.allele1_function %}{% set _ = fns.append(row.allele1_function) %}{% endif %}
+                        {% if row.allele2_function %}{% set _ = fns.append(row.allele2_function) %}{% endif %}
+                        {{ fns | join(' / ') if fns else '&mdash;' }}
+                    </td>
+                    <td>{{ row.guideline_source }}</td>
+                    <td>
+                        {% if row.category == 'actionable' %}
+                            <span class="badge-actionable">需關注</span>
+                        {% else %}
+                            <span class="badge-normal">正常</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="6" style="text-align: center; padding: 30px; color: #64748b; font-style: italic;">
+                        暫無藥物基因體學基因結果。PharmCAT 分析可能尚未完成。
+                    </td>
+                </tr>
+            {% endif %}
+        </tbody>
+    </table>
+
+    <div class="clinical-statement">
+        本藥物基因體學 (PGx) 檢測評估藥物代謝酶、轉運蛋白和藥物靶點的基因變異，以預測個體藥物反應。結果基於 PharmCAT 分析，
+        參照 CPIC 和 DPWG 臨床指南。需關注的結果表明可能需要根據患者基因型調整藥物選擇或劑量。這些結果應結合患者的完整臨床
+        情況進行解讀，包括其他藥物、器官功能和臨床狀態。對於需關注的結果，建議諮詢臨床藥劑師或藥物基因體學專家。
+    </div>
+
+
+    {% set drug_recs = data.pgx.drug_recommendations if data.pgx and data.pgx.drug_recommendations else [] %}
+    {% if actionable | length > 0 and drug_recs | length > 0 %}
+    <div class="new-page">
+        <div class="section-title">藥物處方建議</div>
+        <p style="font-size:8pt;color:#64748b;margin:6px 0 12px;">基於 CPIC / DPWG 臨床指南，針對需關注結果的基因。</p>
+        <table class="drug-rec-table">
+            <thead>
+                <tr>
+                    <th width="10%">基因</th>
+                    <th width="16%">藥物</th>
+                    <th width="8%">來源</th>
+                    <th width="30%">臨床影響</th>
+                    <th width="36%">處方建議</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for rec in drug_recs %}
+                <tr>
+                    <td><span style="font-weight:600;">{{ rec.gene }}</span></td>
+                    <td><span class="drug-name">{{ rec.drug }}</span></td>
+                    <td>{{ rec.source }}</td>
+                    <td><span class="rec-text">{{ rec.implication }}</span></td>
+                    <td><span class="rec-text">{{ rec.recommendation }}</span></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    {% set custom_results = data.pgx.custom_gene_results if data.pgx and data.pgx.custom_gene_results else [] %}
+    {% set custom_variants = custom_results | selectattr('is_variant') | list if custom_results else [] %}
+    {% if custom_results | length > 0 %}
+    <div class="new-page">
+        <div class="section-title">擴展 PGx 基因面板 — 策展變異基因分型</div>
+        <p style="font-size:8pt;color:#64748b;margin:6px 0 8px;">
+            PharmCAT (CPIC/DPWG) 分析之外的額外藥物基因體學標記。
+            {% if custom_variants | length > 0 %}檢測到 {{ custom_variants | length }} 個變異。{% else %}未檢測到變異；所有位點均為純合參考型。{% endif %}
+        </p>
+        <div style="font-size:7pt;color:#475569;margin:0 0 10px;line-height:1.55;padding:6px 8px;border:0.5pt solid #e2e8f0;border-radius:4px;background:#f8fafc;">
+            <strong>狀態：</strong>
+            <span style="background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:3px;font-weight:600;">變異</span> = 患者攜帶非參考等位基因；
+            <span style="background:#f1f5f9;color:#64748b;padding:1px 5px;border-radius:3px;">參考</span> = 純合參考型（野生型）。
+            <strong style="margin-left:6px;">相關藥物：</strong>當存在變異時，療效、代謝或安全性可能受影響的藥物——處方時可能需要劑量調整、替代選擇或額外監測。
+            <br>
+            <strong>證據等級 (CPIC/PharmGKB)：</strong>
+            <strong>1A</strong> = CPIC指南/FDA標籤；
+            <strong>1B</strong> = 強臨床註釋；
+            <strong>2A</strong> = 中等，已重複驗證；
+            <strong>2B</strong> = 中等，有限重複；
+            <strong>3</strong> = 低/單一研究；
+            <strong>4</strong> = 初步/體外。
+        </div>
+        <table class="summary-table">
+            <thead>
+                <tr>
+                    <th width="10%">基因</th>
+                    <th width="12%">rsID</th>
+                    <th width="12%">變異</th>
+                    <th width="10%">基因型</th>
+                    <th width="20%">臨床意義</th>
+                    <th width="22%">相關藥物</th>
+                    <th width="7%">證據</th>
+                    <th width="7%">狀態</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in custom_results %}
+                <tr>
+                    <td><span style="font-weight:600;">{{ row.gene }}</span></td>
+                    <td style="font-size:7pt;">{{ row.rsid }}</td>
+                    <td style="font-size:7pt;">{{ row.variant_name }}</td>
+                    <td style="font-size:7pt;">{{ row.genotype }}</td>
+                    <td style="font-size:7pt;">{{ row.clinical_significance }}</td>
+                    <td style="font-size:7pt;">{{ row.drugs }}</td>
+                    <td style="font-size:7pt;">{{ row.evidence_level }}</td>
+                    <td>
+                        {% if row.is_variant %}
+                            <span class="badge-variant">變異</span>
+                        {% else %}
+                            <span class="badge-ref">參考</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    {% set evaluated = data.pgx.genes_evaluated if data.pgx and data.pgx.genes_evaluated else [] %}
+    {% if evaluated | length > 0 %}
+    <div class="new-page">
+        <div class="section-title">檢測基因列表</div>
+        <p class="detail-text" style="margin-bottom:8px;">
+            本藥物基因體學檢測評估了 {{ evaluated | length }} 個基因的臨床相關藥物基因體學變異。
+            基因通過 PharmCAT（CPIC/DPWG 星號等位基因分析）和/或精選變異基因分型（ClinPGx）進行分析。
+        </p>
+        <div style="font-size:8pt;color:#94a3b8;margin-top:10px;line-height:1.8;text-align:justify;">
+            {{ evaluated | join(', ') }}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="new-page">
+        <div class="section-title">檢測方法與局限性</div>
+        <p class="detail-text">
+        藥物基因體學分析採用 PharmCAT（藥物基因體學臨床注釋工具）進行，該工具將變異調用與已知的藥物基因體學等位基因定義進行匹配，
+        並根據已發布的 CPIC（臨床藥物遺傳學實施聯盟）和 DPWG（荷蘭藥物遺傳學工作組）指南生成表現型預測。<br><br>
+        使用基於雜交的方案從提交的樣本中提取基因組 DNA 並進行目標區域富集，隨後利用 Illumina 技術進行測序。藥物基因中的變異
+        通過標準生物信息學流程調用，並由 PharmCAT 轉換為星號等位基因二倍體型。活性分數和預測表現型根據相關的 CPIC 或 DPWG
+        基因特異性表格分配。藥物-基因交互作用建議遵循已發布的臨床指南。<br><br>
+        局限性：本檢測可能無法檢測所有已知的藥物基因體學變異。PharmCAT 等位基因定義文件中未收錄的罕見或新發等位基因將無法被
+        識別。結構變異、基因缺失、重複和雜合等位基因（例如 CYP2D6 基因轉換）可能無法通過短讀段測序完全解析。活性分數和表現型
+        預測基於當前可用的證據，可能會隨著新數據的出現而更新。本檢測不考慮藥物-藥物交互作用、非遺傳因素（年齡、體重、器官功能、
+        合併用藥）或可能影響藥物代謝的表觀遺傳學修飾。結果應由合格的醫療專業人員結合患者的完整臨床情況進行解讀。<br><br>
+        陰性或「正常」結果不保證正常的藥物反應。藥物基因體學檢測是個性化醫學的組成部分之一，應與標準臨床決策一起使用。
+        </p>
+        <div class="director-section">
+            <div style="margin-bottom: 5px;">
+                <img src="signature.png" style="height: 40px; display: block;" alt="Signature">
+            </div>
+            <div style="font-weight: 600; color: #0f172a; font-size: 8.5pt;">Ken Kwon, PhD, FACMG</div>
+            <div style="font-size: 7pt; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Laboratory Director</div>
+        </div>
+</body>
+</html>

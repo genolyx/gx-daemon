@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+        <style>
+            /* PDF Page Setup */
+            @page {
+                size: Letter;
+                margin: 0.6in 0.5in 1in 0.5in;
+
+                @top-right { content: element(headerContent); }
+                @bottom-left { content: element(footerContent); }
+                @bottom-right {
+                    content: "Page " counter(page) " of " counter(pages);
+                    font-family: 'Helvetica Neue', Arial, sans-serif;
+                    font-size: 8pt;
+                    color: #94a3b8;
+                }
+            }
+
+            @page :first { @top-right { content: none; } }
+
+            body {
+                font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+                line-height: 1.3;
+                color: #334155;
+                margin: 0;
+            }
+
+            #header-content {
+                position: running(headerContent);
+                font-size: 8pt;
+                color: #64748b;
+                text-align: right;
+            }
+
+            #footer-content {
+                position: running(footerContent);
+                width: 100%;
+                font-size: 8pt;
+                color: #64748b;
+                line-height: 1.3;
+                border-top: 1px solid #cbd5e1;
+                padding-top: 8px;
+            }
+
+            .new-page { page-break-before: always; }
+
+            /* Branding Header */
+            .brand-header {
+                border-bottom: 1.5px solid #3b82f6;
+                padding-bottom: 8px;
+                margin-bottom: 25px;
+                display: block;
+                width: 100%;
+                clear: both;
+                overflow: hidden;
+            }
+
+            .brand-name {
+                float: left;
+                font-size: 18pt;
+                font-weight: 500;
+                color: #0f172a;
+                letter-spacing: -0.01em;
+                white-space: nowrap;
+                line-height: 40px;
+            }
+
+            .logo-placeholder {
+                float: right;
+                width: 140px;
+                height: 40px;
+                border: 1px dashed #cbd5e1;
+                text-align: center;
+                line-height: 40px;
+                font-size: 6.5pt;
+                color: #94a3b8;
+                text-transform: uppercase;
+            }
+
+            /* INLINE COMPACT PATIENT INFO TABLE */
+            .info-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 35px;
+                table-layout: fixed;
+                clear: both;
+            }
+            .info-table td {
+                padding: 4px 0;
+                vertical-align: middle;
+                border-bottom: 1px solid #f1f5f9;
+                font-size: 7.5pt;
+            }
+            .label {
+                display: inline;
+                font-size: 7.5pt;
+                color: #64748b;
+                text-transform: uppercase;
+                font-weight: 500;
+                margin-right: 4px;
+            }
+            .value { display: inline; color: #1e293b; }
+            .value-bold { display: inline; font-weight: 500; color: #0f172a; }
+
+            /* Results Banners */
+            .banner {
+                padding: 12px 15px;
+                border-radius: 4px;
+                margin-top: 10px;
+                margin-bottom: 40px;
+            }
+            .banner-actionable { background-color: #fffbeb; color: #92400e; border-left: 4px solid #d97706; }
+            .banner-normal { background-color: #f0fdf4; color: #15803d; border-left: 4px solid #15803d; }
+            .status-text { font-size: 12pt; font-weight: 500; margin: 0; }
+            .banner-desc { margin: 4px 0 0 0; font-size: 8.5pt; color: #334155; }
+
+            /* PGx Results Table */
+            .summary-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 25px;
+            }
+            .summary-table th {
+                text-align: left;
+                font-size: 7pt;
+                color: #64748b;
+                border-bottom: 1.5px solid #cbd5e1;
+                padding: 4px 4px;
+                text-transform: uppercase;
+                font-weight: 500;
+            }
+            .summary-table td {
+                padding: 6px 4px;
+                border-bottom: 1px solid #f1f5f9;
+                font-size: 7.5pt;
+                vertical-align: top;
+            }
+
+            .badge-actionable {
+                display: inline-block;
+                background-color: #fef3c7;
+                color: #92400e;
+                font-size: 7pt;
+                font-weight: 600;
+                padding: 1px 6px;
+                border-radius: 3px;
+                text-transform: uppercase;
+            }
+            .badge-normal {
+                display: inline-block;
+                background-color: #f0fdf4;
+                color: #15803d;
+                font-size: 7pt;
+                font-weight: 500;
+                padding: 1px 6px;
+                border-radius: 3px;
+                text-transform: uppercase;
+            }
+
+            .clinical-statement {
+                font-size: 8pt;
+                color: #64748b;
+                line-height: 1.4;
+                text-align: justify;
+                margin-bottom: 20px;
+                background: #f8fafc;
+                padding: 10px;
+                border-radius: 4px;
+            }
+
+            .section-title {
+                margin-top: 25px;
+                font-size: 11pt;
+                font-weight: 500;
+                color: #0f172a;
+                border-bottom: 1px solid #e2e8f0;
+                padding-bottom: 4px;
+                text-transform: uppercase;
+            }
+
+            .detail-text {
+                font-size: 8pt;
+                color: #334155;
+                margin: 2px 0 0 0;
+                text-align: justify;
+                line-height: 1.3;
+            }
+
+            .pgx-summary-block {
+                white-space: pre-wrap;
+                font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+                font-size: 8pt;
+                line-height: 1.35;
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                padding: 12px;
+                background: #f8fafc;
+                margin-top: 10px;
+            }
+
+            /* Drug Recommendations */
+            .drug-rec-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 20px;
+            }
+            .drug-rec-table th {
+                text-align: left;
+                font-size: 7pt;
+                color: #64748b;
+                border-bottom: 1.5px solid #cbd5e1;
+                padding: 4px 4px;
+                text-transform: uppercase;
+                font-weight: 500;
+            }
+            .drug-rec-table td {
+                padding: 6px 4px;
+                border-bottom: 1px solid #f1f5f9;
+                font-size: 7.5pt;
+                vertical-align: top;
+            }
+            .drug-name { font-weight: 600; text-transform: capitalize; }
+            .rec-text { font-size: 7pt; line-height: 1.3; color: #334155; }
+
+            .badge-variant {
+                display: inline-block;
+                background-color: #fef3c7;
+                color: #92400e;
+                font-size: 7pt;
+                font-weight: 600;
+                padding: 1px 6px;
+                border-radius: 3px;
+            }
+            .badge-ref {
+                display: inline-block;
+                background-color: #f1f5f9;
+                color: #64748b;
+                font-size: 7pt;
+                font-weight: 500;
+                padding: 1px 6px;
+                border-radius: 3px;
+            }
+
+            .director-section {
+                margin-top: 50px;
+                padding-top: 10px;
+                border-top: 1px solid #e2e8f0;
+                page-break-inside: avoid;
+            }
+        </style>
+</head>
+<body>
+
+    <div id="header-content">
+        {{ data.primary_patient.name }} | Order ID: {{ data.report_metadata.order_id }}
+    </div>
+
+    <div id="footer-content">
+        <strong>Genolyx Diagnostics</strong> | 1400 16th Street, San Francisco, CA 94103<br>
+        clientservices@genolyx.com | 800.436.3037 | &copy; 2025 Genolyx Corporation
+    </div>
+
+    <div class="brand-header">
+        <div class="brand-name">Pharmacogenomics (PGx)</div>
+        <div class="logo-placeholder"><span>Logo Placeholder</span></div>
+    </div>
+
+    <table class="info-table">
+        <tr>
+            <td><span class="label">Patient Name:</span> <span class="value">{{ data.primary_patient.name }}</span></td>
+            <td><span class="label">Hospital:</span> <span class="value">{{ data.report_metadata.hospital }}</span></td>
+        </tr>
+        <tr>
+            <td><span class="label">Date of Birth:</span> <span class="value">{{ data.primary_patient.dob }}</span></td>
+            <td><span class="label">Physician:</span> <span class="value">{{ data.report_metadata.doctor }}</span></td>
+        </tr>
+        <tr>
+            <td><span class="label">Gender:</span> <span class="value">{{ data.primary_patient.gender }}</span></td>
+            <td><span class="label">Collected:</span> <span class="value">{{ data.primary_patient.collection_date }}</span></td>
+        </tr>
+        <tr>
+            <td><span class="label">Order ID:</span> <span class="value">{{ data.report_metadata.order_id }}</span></td>
+            <td><span class="label">Report Date:</span> <span class="value">{{ data.report_metadata.report_date }}</span></td>
+        </tr>
+        <tr>
+            <td><span class="label">Sample ID:</span> <span class="value">{{ data.primary_patient.sample_id }}</span></td>
+            <td><span class="label">Status:</span> <span class="value" style="color:#64748b;">FINAL</span></td>
+        </tr>
+    </table>
+
+    {% set gene_results = data.pgx.gene_results if data.pgx and data.pgx.gene_results else [] %}
+    {% set actionable = gene_results | selectattr('category', 'equalto', 'actionable') | list %}
+
+    {% if actionable | length > 0 %}
+    <div class="banner banner-actionable">
+        <p class="status-text">ACTIONABLE RESULT(S)</p>
+        <p class="banner-desc">{{ actionable | length }} gene(s) with actionable pharmacogenomic findings identified. Drug selection or dosing adjustments may be indicated.</p>
+    </div>
+    {% else %}
+    <div class="banner banner-normal">
+        <p class="status-text">NO ACTIONABLE FINDINGS</p>
+        <p class="banner-desc">No actionable pharmacogenomic variants were identified. Standard drug selection and dosing apply for the genes evaluated.</p>
+    </div>
+    {% endif %}
+
+    <table class="summary-table">
+        <thead>
+            <tr>
+                <th width="12%">Gene</th>
+                <th width="18%">Diplotype</th>
+                <th width="22%">Phenotype</th>
+                <th width="24%">Allele Functions</th>
+                <th width="11%">Source</th>
+                <th width="13%">Category</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% if gene_results | length > 0 %}
+                {% for row in gene_results %}
+                <tr>
+                    <td><span style="font-weight:600;">{{ row.gene }}</span></td>
+                    <td><span style="font-size:7pt;">{{ row.diplotype }}</span></td>
+                    <td>{{ row.phenotype }}</td>
+                    <td style="font-size:7pt;">
+                        {% set fns = [] %}
+                        {% if row.allele1_function %}{% set _ = fns.append(row.allele1_function) %}{% endif %}
+                        {% if row.allele2_function %}{% set _ = fns.append(row.allele2_function) %}{% endif %}
+                        {{ fns | join(' / ') if fns else '&mdash;' }}
+                    </td>
+                    <td>{{ row.guideline_source }}</td>
+                    <td>
+                        {% if row.category == 'actionable' %}
+                            <span class="badge-actionable">Actionable</span>
+                        {% else %}
+                            <span class="badge-normal">Normal</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="6" style="text-align: center; padding: 30px; color: #64748b; font-style: italic;">
+                        No pharmacogenomic gene results available. PharmCAT analysis may not have completed.
+                    </td>
+                </tr>
+            {% endif %}
+        </tbody>
+    </table>
+
+    <div class="clinical-statement">
+        This pharmacogenomics (PGx) test evaluates genetic variants in drug-metabolizing enzymes, transporters, and drug targets
+        to predict individual drug response. Results are derived from PharmCAT analysis using CPIC and DPWG clinical guidelines.
+        Actionable findings indicate that drug selection or dose adjustment may be warranted based on the patient's genotype.
+        These results should be interpreted in the context of the patient's complete clinical picture, including other medications,
+        organ function, and clinical status. Consultation with a clinical pharmacist or pharmacogenomics specialist is recommended
+        for actionable results.
+    </div>
+
+    {% set drug_recs = data.pgx.drug_recommendations if data.pgx and data.pgx.drug_recommendations else [] %}
+    {% if actionable | length > 0 and drug_recs | length > 0 %}
+    <div class="new-page">
+        <div class="section-title">Drug Prescribing Recommendations</div>
+        <p style="font-size:8pt;color:#64748b;margin:6px 0 12px;">Based on CPIC / DPWG clinical guidelines for genes with actionable findings.</p>
+        <table class="drug-rec-table">
+            <thead>
+                <tr>
+                    <th width="10%">Gene</th>
+                    <th width="16%">Drug</th>
+                    <th width="8%">Source</th>
+                    <th width="30%">Clinical Implication</th>
+                    <th width="36%">Prescribing Recommendation</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for rec in drug_recs %}
+                <tr>
+                    <td><span style="font-weight:600;">{{ rec.gene }}</span></td>
+                    <td><span class="drug-name">{{ rec.drug }}</span></td>
+                    <td>{{ rec.source }}</td>
+                    <td><span class="rec-text">{{ rec.implication }}</span></td>
+                    <td><span class="rec-text">{{ rec.recommendation }}</span></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    {% set custom_results = data.pgx.custom_gene_results if data.pgx and data.pgx.custom_gene_results else [] %}
+    {% set custom_variants = custom_results | selectattr('is_variant') | list if custom_results else [] %}
+    {% if custom_results | length > 0 %}
+    <div class="new-page">
+        <div class="section-title">Extended PGx Panel — Curated Variant Genotyping</div>
+        <p style="font-size:8pt;color:#64748b;margin:6px 0 8px;">
+            Additional pharmacogenomic markers beyond PharmCAT (CPIC/DPWG) analysis.
+            Variants are genotyped from the sequencing data against curated positions from ClinPGx.
+            {% if custom_variants | length > 0 %}{{ custom_variants | length }} variant(s) detected.{% else %}No variants detected; all positions are homozygous reference.{% endif %}
+        </p>
+        <div style="font-size:7pt;color:#475569;margin:0 0 10px;line-height:1.55;padding:6px 8px;border:0.5pt solid #e2e8f0;border-radius:4px;background:#f8fafc;">
+            <strong>Status:</strong>
+            <span style="background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:3px;font-weight:600;">Variant</span> = patient carries a non-reference allele;
+            <span style="background:#f1f5f9;color:#64748b;padding:1px 5px;border-radius:3px;">Ref</span> = homozygous reference (wild-type).
+            <strong style="margin-left:6px;">Affected Drug(s):</strong> Medications whose efficacy, metabolism, or safety may be altered when a variant is present — prescribing may require dose adjustment, alternative selection, or additional monitoring.
+            <br>
+            <strong>Evidence levels (CPIC/PharmGKB):</strong>
+            <strong>1A</strong> = CPIC guideline / FDA label;
+            <strong>1B</strong> = strong clinical annotation;
+            <strong>2A</strong> = moderate, replicated;
+            <strong>2B</strong> = moderate, limited replication;
+            <strong>3</strong> = low / single study;
+            <strong>4</strong> = preliminary / in-vitro.
+        </div>
+        <table class="summary-table">
+            <thead>
+                <tr>
+                    <th width="10%">Gene</th>
+                    <th width="12%">rsID</th>
+                    <th width="12%">Variant</th>
+                    <th width="10%">Genotype</th>
+                    <th width="20%">Significance</th>
+                    <th width="22%">Affected Drug(s)</th>
+                    <th width="7%">Evidence</th>
+                    <th width="7%">Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in custom_results %}
+                <tr>
+                    <td><span style="font-weight:600;">{{ row.gene }}</span></td>
+                    <td style="font-size:7pt;">{{ row.rsid }}</td>
+                    <td style="font-size:7pt;">{{ row.variant_name }}</td>
+                    <td style="font-size:7pt;">{{ row.genotype }}</td>
+                    <td style="font-size:7pt;">{{ row.clinical_significance }}</td>
+                    <td style="font-size:7pt;">{{ row.drugs }}</td>
+                    <td style="font-size:7pt;">{{ row.evidence_level }}</td>
+                    <td>
+                        {% if row.is_variant %}
+                            <span class="badge-variant">Variant</span>
+                        {% else %}
+                            <span class="badge-ref">Ref</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    {% set evaluated = data.pgx.genes_evaluated if data.pgx and data.pgx.genes_evaluated else [] %}
+    {% if evaluated | length > 0 %}
+    <div class="new-page">
+        <div class="section-title">Genes Evaluated</div>
+        <p class="detail-text" style="margin-bottom:8px;">
+            This pharmacogenomics panel evaluated {{ evaluated | length }} gene(s) for clinically relevant pharmacogenomic variants.
+            Genes are analyzed via PharmCAT (CPIC/DPWG star-allele calling) and/or curated variant genotyping (ClinPGx).
+        </p>
+        <div style="font-size:8pt;color:#94a3b8;margin-top:10px;line-height:1.8;text-align:justify;">
+            {{ evaluated | join(', ') }}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="new-page">
+        <div class="section-title">Methods and Limitations</div>
+        <p class="detail-text">
+        Pharmacogenomic analysis is performed using PharmCAT (Pharmacogenomics Clinical Annotation Tool), which matches variant
+        calls to known pharmacogenomic allele definitions and generates phenotype predictions based on published CPIC (Clinical
+        Pharmacogenetics Implementation Consortium) and DPWG (Dutch Pharmacogenetics Working Group) guidelines.<br><br>
+        Genomic DNA obtained from the submitted sample is enriched for targeted regions using a hybridization-based protocol, and sequenced using
+        Illumina technology. Variants within pharmacogenes are called using standard bioinformatics pipelines and translated into star-allele
+        diplotypes by PharmCAT. Activity scores and predicted phenotypes are assigned according to the relevant CPIC or DPWG gene-specific
+        tables. Drug-gene interaction recommendations follow published clinical guidelines.<br><br>
+        Limitations: This test may not detect all known pharmacogenomic variants. Rare or novel alleles not cataloged in PharmCAT's allele
+        definition files will not be identified. Structural variants, gene deletions, duplications, and hybrid alleles (e.g., CYP2D6 gene
+        conversions) may not be fully resolved by short-read sequencing. Activity scores and phenotype predictions are based on currently
+        available evidence and may be updated as new data emerge. This test does not account for drug-drug interactions, non-genetic factors
+        (age, weight, organ function, concomitant medications), or epigenetic modifications that may influence drug metabolism. Results should
+        be interpreted by a qualified healthcare professional in the context of the patient's complete clinical picture.<br><br>
+        A negative or "normal" result does not guarantee a normal drug response. Pharmacogenomic testing is one component of personalized
+        medicine and should be used alongside standard clinical decision-making.
+        </p>
+        <div class="director-section">
+            <div style="margin-bottom: 5px;">
+                <img src="signature.png" style="height: 40px; display: block;" alt="Signature">
+            </div>
+            <div style="font-weight: 600; color: #0f172a; font-size: 8.5pt;">Ken Kwon, PhD, FACMG</div>
+            <div style="font-size: 7pt; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Laboratory Director</div>
+        </div>
+</body>
+</html>

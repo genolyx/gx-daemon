@@ -1,0 +1,32 @@
+# GX-Daemon Dependencies
+# Merges service-daemon (carrier screening) + nipt-daemon (platform integration)
+
+# Web framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+httpx>=0.25.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+python-dotenv>=1.0.0
+python-multipart>=0.0.6
+colorlog>=6.7.0
+
+# Carrier VCF parsing / annotation
+pysam>=0.22.0
+intervaltree>=3.1.0
+
+# Report rendering (Carrier: Jinja+WeasyPrint, NIPT: PPTX→PDF)
+jinja2>=3.1.0
+weasyprint>=61.0
+python-pptx>=0.6.21
+pypdf>=4.0.0
+reportlab>=4.0.0
+Pillow>=10.0.0
+pandas>=2.1.0
+
+# System resource monitoring
+psutil>=5.9.0
+
+# AI / Literature
+openai>=1.30.0
+google-genai>=1.0.0
