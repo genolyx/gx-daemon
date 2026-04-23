@@ -46,7 +46,11 @@ from .services import load_plugins, get_plugin, list_service_codes, get_all_plug
 logger = logging.getLogger(__name__)
 
 _CARRIER_LIKE = frozenset({"carrier_screening", "whole_exome", "health_screening"})
-_NIPT_TYPES = frozenset({"NIPT", "nipt", "sgnipt", "SGNIPT"})
+# Platform order ``type`` strings that should route to the NIPT pipeline
+# (gx-nipt / Nextflow). Keep sgNIPT (single-gene) strings as a separate
+# cluster so they go to the sgnipt plugin.
+_NIPT_TYPES   = frozenset({"NIPT", "nipt"})
+_SGNIPT_TYPES = frozenset({"SGNIPT", "sgnipt", "SG_NIPT", "sg-nipt"})
 
 _RESULT_JSON_CACHE_HEADERS = {
     "Cache-Control": "no-store, no-cache, must-revalidate",
@@ -148,7 +152,10 @@ async def health():
 
 def _detect_service_code(dto_type: str) -> str:
     """Detect service_code from the Platform order type field."""
-    if dto_type.upper() in _NIPT_TYPES:
+    t = (dto_type or "").strip()
+    if t in _NIPT_TYPES or t.upper() == "NIPT":
+        return "nipt"
+    if t in _SGNIPT_TYPES or t.upper() in {"SGNIPT", "SG_NIPT", "SG-NIPT"}:
         return "sgnipt"
     return "carrier_screening"
 
@@ -188,7 +195,10 @@ async def platform_submit_order(order_id: str, dto: SubmitOrderDto, background: 
             },
         )
 
-        if service_code == "sgnipt":
+        if service_code in ("sgnipt", "nipt"):
+            # Both NIPT variants need the Portal FASTQ download dance
+            # before enqueue. Run that asynchronously so the Platform
+            # request returns quickly.
             background.add_task(_enqueue_nipt_order, qm, order_id, od, dto, job)
         else:
             await qm.enqueue(job)

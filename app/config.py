@@ -167,14 +167,69 @@ class Settings(BaseSettings):
     ncbi_tool: str = Field(default="gx-daemon")
 
     # ─── Enabled Services ──────────────────────────────────
-    enabled_services: str = Field(default="carrier_screening,whole_exome,health_screening,sgnipt")
+    enabled_services: str = Field(default="carrier_screening,whole_exome,health_screening,sgnipt,nipt")
 
-    # ─── NIPT (from nipt-daemon) ────────────────────────────
-    nipt_root_dir: str = Field(default="/home/ken/ken-nipt", description="NIPT pipeline root directory")
-    nipt_fastq_dir: str = Field(default="/home/ken/ken-nipt/fastq")
-    nipt_output_dir: str = Field(default="/home/ken/ken-nipt/output")
-    nipt_analysis_dir: str = Field(default="/home/ken/ken-nipt/analysis")
-    nipt_script_dir: str = Field(default="/home/ken/ken-nipt/src")
+    # ─── NIPT (gx-nipt / Nextflow) ─────────────────────────
+    # nipt_root_dir is the base under which {fastq,analysis,output,log,config}
+    # subdirs live. ``run_nipt.sh`` and the NIPTPlugin both expect this layout:
+    #   {nipt_root_dir}/fastq/<work_dir>/<order_id>/R[12].fastq.gz
+    #   {nipt_root_dir}/analysis/<work_dir>/<order_id>/
+    #   {nipt_root_dir}/output/<work_dir>/<order_id>/<order_id>.json
+    #   {nipt_root_dir}/log/<work_dir>/<order_id>/pipeline.log
+    #   {nipt_root_dir}/config/<labcode>/pipeline_config.json
+    # ``nipt_pipeline_dir`` is the gx-nipt source checkout (has main.nf + bin/).
+    nipt_root_dir: str = Field(
+        default="/home/ken/gx-nipt-data",
+        description="Base directory for gx-nipt fastq/analysis/output/log/config",
+    )
+    nipt_fastq_dir: str = Field(default="/home/ken/gx-nipt-data/fastq")
+    nipt_output_dir: str = Field(default="/home/ken/gx-nipt-data/output")
+    nipt_analysis_dir: str = Field(default="/home/ken/gx-nipt-data/analysis")
+    nipt_log_dir: str = Field(default="/home/ken/gx-nipt-data/log")
+    nipt_config_dir: str = Field(default="/home/ken/gx-nipt-data/config")
+    nipt_script_dir: str = Field(default="/home/ken/gx-nipt/bin")
+    nipt_run_script: Optional[str] = Field(
+        default=None,
+        description="Override path to bin/run_nipt.sh (defaults to <nipt_pipeline_dir>/bin/run_nipt.sh)",
+    )
+    nipt_default_labcode: str = Field(
+        default="",
+        description="Fallback labcode used when the Platform DTO does not specify one",
+    )
+    # Reference data root. The directory is bind-mounted (read-only) into the
+    # gx-nipt Docker container at the same path. Expected layout:
+    #   ${NIPT_REF_DIR}/genomes/hg19/hg19.fa(+ BWA-MEM2 index)
+    #   ${NIPT_REF_DIR}/hmmcopy/hg19.{50kb,10mb}.{gc,map}.wig
+    #   ${NIPT_REF_DIR}/models/seqff_model.pkl
+    #   ${NIPT_REF_DIR}/labs/<labcode>/{WC,WCX,EZD,PRIZM}/<group>/...
+    #   ${NIPT_REF_DIR}/labs/<labcode>/bed/...
+    nipt_ref_dir: str = Field(
+        default="/data/reference",
+        description="Host path to the gx-nipt reference data root",
+    )
+    # SSD scratch knobs (exposed to run_nipt.sh)
+    nipt_use_ssd: bool = Field(default=False, description="Enable SSD scratch profile for gx-nipt")
+    nipt_scratch_dir: Optional[str] = Field(
+        default=None,
+        description="Scratch directory on fast storage (e.g. /tmp/nipt_scratch)",
+    )
+    nipt_ssd_max_usage_gb: Optional[int] = Field(
+        default=None,
+        description="Soft cap on scratch usage in GB (passed to run_nipt.sh --ssd-max-usage-gb)",
+    )
+    # Model / reference overrides for gx-FF and gx-cnv.
+    # Both are DEFERRED: the training/reference-building pipelines in
+    # genolyx/gx-FF and genolyx/gx-cnv have not produced artefacts yet.
+    # Leave these unset and the gx-nipt pipeline will fall back to:
+    #   - seqFF only (no LightGBM+DNN ensemble) for FF estimation
+    #   - WisecondorX only (no hybrid dual-track) for CNV calling
+    nipt_gxff_model: Optional[str] = Field(default=None)
+    nipt_gxcnv_reference: Optional[str] = Field(default=None)
+    # Alias for nipt_gxcnv_reference — some specs refer to the file as
+    # the "gx-cnv model". Either env var will be forwarded as
+    # --gxcnv-reference to the wrapper.
+    nipt_gxcnv_model: Optional[str] = Field(default=None)
+    nipt_run_wcx: bool = Field(default=True, description="Run WisecondorX inside gx-nipt")
     nipt_report_engine: str = Field(
         default="pptx",
         description="NIPT report engine: 'pptx' (legacy PPTX→PDF) or 'html' (Jinja2 HTML→WeasyPrint PDF)",
@@ -199,7 +254,8 @@ class Settings(BaseSettings):
     sgnipt_container_mount_root: str = Field(default="/Work/SgNIPT")
     sgnipt_use_docker: bool = Field(default=True)
     sgnipt_docker_extra_args: str = Field(default="")
-    nipt_pipeline_dir: str = Field(default="/opt/pipelines/nipt")
+    # gx-nipt source checkout (must contain main.nf and bin/run_nipt.sh)
+    nipt_pipeline_dir: str = Field(default="/home/ken/gx-nipt")
     sgnipt_pipeline_dir: str = Field(default="/opt/pipelines/sgnipt")
 
     @field_validator("gemini_api_key", "acmg_ai_api_key", mode="before")
