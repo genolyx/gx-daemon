@@ -267,7 +267,12 @@ async def start_order(order_id: str, body: StartOrderRequest = Body(StartOrderRe
     """Start a saved/failed order."""
     qm = get_queue_manager()
     try:
-        job, pos = await qm.start_saved_job(order_id, fresh=body.fresh)
+        job, pos = await qm.start_saved_job(
+            order_id,
+            fresh=body.fresh,
+            use_ssd=body.use_ssd,
+            scratch_dir=body.scratch_dir,
+        )
     except KeyError:
         raise HTTPException(404, f"Order not found or not startable: {order_id}")
     except ValueError as e:

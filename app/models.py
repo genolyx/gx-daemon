@@ -222,6 +222,14 @@ class OrderSubmitResponse(BaseModel):
 
 class StartOrderRequest(BaseModel):
     fresh: bool = Field(default=False)
+    use_ssd: bool = Field(
+        default=False,
+        description="Carrier / whole exome / health: run_analysis.sh --use-ssd (SSD scratch).",
+    )
+    scratch_dir: Optional[str] = Field(
+        default=None,
+        description="Host path for --scratch-dir when use_ssd is true.",
+    )
 
 
 class OrderSaveResponse(BaseModel):
