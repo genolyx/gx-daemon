@@ -515,7 +515,6 @@ async def make_report_json(order_id: str, review_json: Dict[str, Any]) -> Dict[s
 
     try:
         # 1. 주문 상세 정보 조회
-        from .aws_client import get_order_detail
         order = await get_order_detail(order_id)
         logger.debug(f"Retrieved order details for {order_id}")
         logger.info(order)
