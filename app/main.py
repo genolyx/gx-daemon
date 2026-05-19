@@ -767,10 +767,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# credentials=True is incompatible with origins=["*"] in browsers; Portal may call this
+# from another port (e.g. service-daemon :8003 → gx-daemon :8001), so use * without credentials.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

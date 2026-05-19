@@ -7,9 +7,11 @@ Alternative to the legacy PPTX→LibreOffice PDF pipeline.
 Template lives in data/nipt_report_html/GX_Report_Template.html
 """
 
+import base64
 import itertools
 import logging
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 from jinja2 import Environment, FileSystemLoader
@@ -326,6 +328,24 @@ def generate_html_report(
     )
 
     os.makedirs(output_dir, exist_ok=True)
+
+    # 상대 경로 이미지를 base64 data URI로 인라인 임베드 → HTML 단독 파일로 완결
+    def _inline_images(html: str, base_dir: str) -> str:
+        def replacer(m: re.Match) -> str:
+            src = m.group(1)
+            if src.startswith(("http://", "https://", "data:")):
+                return m.group(0)
+            img_path = os.path.join(base_dir, src)
+            if not os.path.isfile(img_path):
+                return m.group(0)
+            ext = os.path.splitext(src)[1].lstrip(".").lower()
+            mime = {"jpg": "jpeg", "svg": "svg+xml"}.get(ext, ext)
+            with open(img_path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode()
+            return f'src="data:image/{mime};base64,{b64}"'
+        return re.sub(r'src="([^"]+)"', replacer, html)
+
+    html_output = _inline_images(html_output, tpl_dir)
 
     order_id = str(report_json.get("Order ID", "report")).strip().replace(" ", "_")
     sample_id = str(report_json.get("Sample ID") or report_json.get("Sample Number") or "").strip().replace(" ", "_")

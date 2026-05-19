@@ -1,0 +1,55 @@
+# 로컬 개발: 소스 마운트 + uvicorn --reload. service-daemon 의 docker-compose-dev.yml 패턴과 동일 계열.
+# 사용 전: cp .env.compose.example .env.compose && 편집
+# 실행: ./docker-dev-up.sh   또는
+#       docker compose --env-file .env.compose -f docker-compose-dev.yml up --build
+
+services:
+  gx-daemon:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TZ: ${TZ:-Asia/Seoul}
+        HOST_UID: ${HOST_UID}
+        HOST_GID: ${HOST_GID}
+        DOCKER_GID: ${DOCKER_GID}
+    image: gx-daemon:latest
+    container_name: ${APP_ENV:-dev}-gx-daemon
+    restart: unless-stopped
+
+    env_file:
+      - path: .env
+        required: true
+
+    environment:
+      APP_ENV: ${APP_ENV:-dev}
+
+    command: /bin/sh -c "uvicorn app.main:app --host 0.0.0.0 --port $${APP_PORT:-8000} --no-access-log --reload --reload-dir /app/app"
+
+    ports:
+      - "${HOST_PORT:-8000}:${APP_PORT:-8000}"
+
+    user: "${HOST_UID}:${HOST_GID}"
+    group_add:
+      - "${DOCKER_GID}"
+
+    volumes:
+      # 소스 마운트: 코드 수정 시 재빌드 없이 --reload 로 반영
+      - ./app:/app/app
+      - ./data/report_templates:/app/data/report_templates:ro
+      - ./data/nipt_report_html:/app/data/nipt_report_html:ro
+      - ${BASE_DIR:-/data}:/data
+      # Carrier Screening / Whole Exome: (1) /data/gx-exome (2) HOST:HOST (run_analysis docker -v 용)
+      - ${CARRIER_SCREENING_HOST:-/home/ken/gx-exome}:/data/gx-exome
+      - ${CARRIER_SCREENING_HOST:-/home/ken/gx-exome}:${CARRIER_SCREENING_HOST:-/home/ken/gx-exome}
+      - ${BASE_DIR:-/data}/reference:/data/reference:ro
+      - ${CARRIER_SCREENING_PIPELINE_DIR:-/opt/pipelines/carrier-screening}:/opt/pipelines/carrier-screening:ro
+      - ${NIPT_PIPELINE_DIR:-/home/ken/gx-nipt}:${NIPT_PIPELINE_DIR:-/home/ken/gx-nipt}:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:$${APP_PORT:-8000}/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
