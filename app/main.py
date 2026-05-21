@@ -26,7 +26,7 @@ from pydantic import BaseModel
 
 from .config import settings
 from .datetime_kst import now_kst_iso, now_kst_date_compact
-from .logging_config import setup_logging, setup_middleware
+from .logging_config import setup_logging, setup_middleware, get_log_lines
 from .models import (
     OrderSubmitRequest, OrderSubmitResponse, OrderSaveResponse, OrderStatusResponse,
     OrderUpdateRequest, OrderUpdateResponse, StartOrderRequest,
@@ -825,12 +825,20 @@ async def health():
     qm = get_queue_manager()
     return {
         "status": "ok",
+        "service": settings.app_name,
         "environment": settings.app_env,
         "queue_size": qm._queue.qsize(),
         "running": len(qm._running_jobs),
         "max_concurrent": qm.max_concurrent,
         "available_slots": qm.available_slots,
+        "registered_services": list_service_codes(),
     }
+
+
+@app.get("/daemon-log")
+async def daemon_log(lines: int = Query(default=200, ge=1, le=500)):
+    """Return recent in-memory daemon application log lines (newest last)."""
+    return {"lines": get_log_lines(last_n=lines)}
 
 
 # ══════════════════════════════════════════════════════════════
@@ -864,6 +872,15 @@ async def platform_submit_order(order_id: str, dto: SubmitOrderDto, background: 
         )
 
         service_code = _detect_service_code(dto.type)
+        if not get_plugin(service_code):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"This daemon ({settings.app_name}) does not support service_code "
+                    f"'{service_code}' (mapped from order type '{dto.type}'). "
+                    f"Registered services: {list_service_codes()}."
+                ),
+            )
         work_dir = extract_work_dir(order_id)
 
         job = Job(
@@ -953,8 +970,23 @@ async def save_order(service_code: str, req: OrderSubmitRequest = Body(...)):
 async def start_order(order_id: str, body: StartOrderRequest = Body(StartOrderRequest())):
     """Start a saved/failed order."""
     qm = get_queue_manager()
+    preview = qm.get_job(order_id)
+    if preview and not get_plugin(preview.service_code):
+        raise HTTPException(
+            400,
+            (
+                f"This daemon ({settings.app_name}) does not support service_code "
+                f"'{preview.service_code}'. Registered services: {list_service_codes()}. "
+                f"Switch to a daemon that supports this service."
+            ),
+        )
     try:
-        job, pos = await qm.start_saved_job(order_id, fresh=body.fresh)
+        job, pos = await qm.start_saved_job(
+            order_id,
+            fresh=body.fresh,
+            use_ssd=getattr(body, "use_ssd", False),
+            scratch_dir=getattr(body, "scratch_dir", None),
+        )
     except KeyError:
         raise HTTPException(404, f"Order not found or not startable: {order_id}")
     except ValueError as e:
@@ -969,8 +1001,14 @@ async def start_order(order_id: str, body: StartOrderRequest = Body(StartOrderRe
 async def submit_order(service_code: str, req: OrderSubmitRequest = Body(...)):
     """Save + immediately queue an order (local API)."""
     qm = get_queue_manager()
-    if service_code not in settings.enabled_service_list:
-        raise HTTPException(400, f"Unknown service_code: {service_code}")
+    if not get_plugin(service_code):
+        raise HTTPException(
+            400,
+            (
+                f"Unknown or unsupported service_code '{service_code}' on this daemon "
+                f"({settings.app_name}). Registered services: {list_service_codes()}."
+            ),
+        )
 
     job = Job(
         order_id=req.order_id,
@@ -1046,14 +1084,25 @@ async def get_order(order_id: str):
 async def list_orders(
     service_code: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
+    limit: Optional[int] = Query(None),
 ):
     qm = get_queue_manager()
     jobs = qm.iter_all_jobs_unique()
     if service_code:
         jobs = [j for j in jobs if j.service_code == service_code]
     if status:
-        jobs = [j for j in jobs if j.status.value.upper() == status.upper()]
-    return [j.model_dump(mode="json") for j in jobs]
+        # "COMPLETED" 필터는 REPORT_READY도 포함 (service-daemon과 동일)
+        if status.upper() == OrderStatus.COMPLETED.value:
+            jobs = [j for j in jobs if j.status.value in (OrderStatus.COMPLETED.value, OrderStatus.REPORT_READY.value)]
+        else:
+            jobs = [j for j in jobs if j.status.value.upper() == status.upper()]
+    jobs = sorted(jobs, key=lambda j: j.created_at or "", reverse=True)
+    if limit:
+        jobs = jobs[:limit]
+    return {
+        "orders": [j.model_dump(mode="json") for j in jobs],
+        "total": len(jobs),
+    }
 
 
 # ══════════════════════════════════════════════════════════════
