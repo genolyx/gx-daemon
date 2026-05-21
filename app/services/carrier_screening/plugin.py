@@ -916,6 +916,26 @@ class CarrierScreeningPlugin(ServicePlugin):
             return r
         return os.path.join(self._run_analysis_data_dir(), "data", "refs")
 
+    def _normalize_fastq_path(self, fq_abs: str) -> str:
+        """
+        DB에 저장된 FASTQ 경로가 컨테이너 내부 경로(예: /data/gx-exome/...)를 사용하지만
+        expected_fastq_dir 계산에는 호스트 경로(예: /home/ken/gx-exome/...)를 사용할 때,
+        os.path.relpath가 경로 트리를 벗어난 깊은 상대 경로(../../../../../../data/...)를 생성해
+        호스트에서 심링크가 깨지는 문제를 방지한다.
+
+        _GX_EXOME_LAYOUT_PREFIX(/data/gx-exome)로 시작하는 경로를 실제 layout_base 경로로
+        정규화해 심링크 타깃이 호스트에서도 유효하도록 한다.
+        """
+        layout_base = self._run_analysis_data_dir()
+        if (
+            layout_base != _GX_EXOME_LAYOUT_PREFIX
+            and fq_abs.startswith(_GX_EXOME_LAYOUT_PREFIX + "/")
+        ):
+            normalized = layout_base.rstrip("/") + fq_abs[len(_GX_EXOME_LAYOUT_PREFIX):]
+            if os.path.isfile(normalized):
+                return normalized
+        return fq_abs
+
     def _ensure_fastq_symlinks(self, job: Job, expected_fastq_dir: str) -> None:
         """
         fastq_r1_path / fastq_r2_path 가 expected_fastq_dir 밖에 있을 때,
@@ -923,7 +943,7 @@ class CarrierScreeningPlugin(ServicePlugin):
 
         목적:
           - --sample = order_id 로 고정하되, FASTQ 는 어느 디렉토리에서든 선택 가능.
-          - 상대 링크이므로 docker DinD 에서 ${DATA_DIR}/fastq 를 마운트해도 정상 작동.
+          - 상대 링크이므로 호스트와 docker DinD 모두에서 정상 작동.
           - 읽기 전용 FASTQ 를 여러 오더가 동시에 사용해도 안전 (read-only, 상태 없음).
         """
         for attr in ("fastq_r1_path", "fastq_r2_path"):
@@ -931,6 +951,10 @@ class CarrierScreeningPlugin(ServicePlugin):
             if not fq:
                 continue
             fq_abs = os.path.abspath(fq)
+            # DB에 컨테이너 경로(/data/gx-exome/...)가 저장된 경우 호스트 경로로 정규화.
+            # 그래야 expected_fastq_dir(호스트 경로 기반)과의 relpath가 동일 트리 내 단순
+            # 상대 경로(../other_sample/file.gz)로 계산되어 호스트에서도 심링크가 유효하다.
+            fq_abs = self._normalize_fastq_path(fq_abs)
             if not os.path.isfile(fq_abs):
                 continue
             fq_dir = os.path.realpath(os.path.dirname(fq_abs))
@@ -1021,6 +1045,25 @@ class CarrierScreeningPlugin(ServicePlugin):
         work_arg = carrier_run_analysis_work_arg(job)
         carrier_params = (job.params or {}).get("carrier") or {}
         capture_panel = (carrier_params.get("capture_panel_id") or "").strip() or "twist-exome2"
+
+        # Prior-reuse Force Run: use the original FASTQ folder directly instead of creating
+        # symlinks. The fastq_dir stored on the job points to the prior order's FASTQ tree;
+        # derive --sample from its basename so run_analysis.sh finds files without symlinks.
+        is_prior_reuse_fresh = (
+            bool((job.params or {}).get("_prior_reuse"))
+            and bool((job.params or {}).get("_pipeline_fresh"))
+        )
+        if is_prior_reuse_fresh and job.fastq_dir:
+            prior_fastq_leaf = os.path.basename(job.fastq_dir.rstrip("/"))
+            if prior_fastq_leaf and prior_fastq_leaf != sample_folder:
+                prior_fastq_dir = os.path.join(data_dir, "fastq", work_arg, prior_fastq_leaf)
+                if os.path.isdir(prior_fastq_dir):
+                    logger.info(
+                        "[carrier_screening] prior_reuse Force Run: using original FASTQ folder "
+                        "'%s' (not '%s') for order %s to avoid cross-tree symlinks.",
+                        prior_fastq_leaf, sample_folder, job.order_id,
+                    )
+                    sample_folder = prior_fastq_leaf
 
         # FASTQ가 예상 위치({data_dir}/fastq/{work}/{order_id}/)에 없으면 심볼릭 링크 생성.
         # 같은 fastq/ 트리 내의 상대 링크이므로 docker DinD 마운트에서도 정상 작동.
@@ -1215,9 +1258,33 @@ class CarrierScreeningPlugin(ServicePlugin):
             )
             return "true"
         if job.params.get("_prior_reuse") and (job.params or {}).get("_pipeline_fresh"):
+            # Verify FASTQ files actually exist for this sample before attempting a full re-run.
+            # Prior-reuse orders reuse another order's VCF and may not have their own FASTQs.
+            # Check the sample-name-based fastq path that run_analysis.sh will actually use.
+            from .layout_norm import carrier_run_analysis_work_arg
+            work_root = settings.carrier_screening_layout_base
+            wk = carrier_run_analysis_work_arg(job)
+            leaf = carrier_sequencing_folder(job)
+            sample_fastq_dir = os.path.join(work_root, "fastq", wk, leaf)
+            has_fastq = os.path.isdir(sample_fastq_dir) and any(
+                "_R1_" in f and (f.endswith(".fastq.gz") or f.endswith(".fq.gz"))
+                for f in os.listdir(sample_fastq_dir)
+            )
+            if not has_fastq:
+                logger.warning(
+                    "[carrier_screening] Force Run (Fresh) requested for _prior_reuse order %s "
+                    "but no FASTQ found under %r — falling back to report-only reprocess. "
+                    "To re-align from FASTQ, place R1/R2 files in %r first.",
+                    job.order_id,
+                    sample_fastq_dir,
+                    sample_fastq_dir,
+                )
+                return "true"
             logger.info(
-                "[carrier_screening] Force Run (Fresh): running full pipeline despite _prior_reuse for %s",
+                "[carrier_screening] Force Run (Fresh): running full pipeline despite _prior_reuse for %s "
+                "(FASTQ found at %s)",
                 job.order_id,
+                sample_fastq_dir,
             )
 
         script_path = self._effective_run_analysis_script()

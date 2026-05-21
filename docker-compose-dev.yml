@@ -23,6 +23,7 @@ services:
 
     environment:
       APP_ENV: ${APP_ENV:-dev}
+      CARRIER_SCREENING_ARTIFACT_BASE: ${CARRIER_SCREENING_ARTIFACT_BASE:-/data/gx-exome-work}
 
     command: /bin/sh -c "uvicorn app.main:app --host 0.0.0.0 --port $${APP_PORT:-8000} --no-access-log --reload --reload-dir /app/app"
 
@@ -45,6 +46,12 @@ services:
       - ${BASE_DIR:-/data}/reference:/data/reference:ro
       - ${CARRIER_SCREENING_PIPELINE_DIR:-/opt/pipelines/carrier-screening}:/opt/pipelines/carrier-screening:ro
       - ${NIPT_PIPELINE_DIR:-/home/ken/gx-nipt}:${NIPT_PIPELINE_DIR:-/home/ken/gx-nipt}:ro
+      # sgNIPT: src (run_sgnipt.sh), data layout, work dir
+      - ${SGNIPT_SRC_HOST:-/home/ken/sgnipt}:${SGNIPT_SRC_HOST:-/home/ken/sgnipt}:ro
+      - ${SGNIPT_LAYOUT_HOST:-/home/ken/sgNIPT}:${SGNIPT_LAYOUT_HOST:-/home/ken/sgNIPT}
+      - ${SGNIPT_LAYOUT_HOST:-/home/ken/sgNIPT}/data:${BASE_DIR:-/data}/sgnipt_work/data:ro
+      - ${SGNIPT_LAYOUT_HOST:-/home/ken/sgNIPT}/config:${BASE_DIR:-/data}/sgnipt_work/config:ro
+      - ${SGNIPT_LAYOUT_HOST:-/home/ken/sgNIPT}/fastq:${BASE_DIR:-/data}/sgnipt_work/fastq
       - /var/run/docker.sock:/var/run/docker.sock
 
     healthcheck:

@@ -492,7 +492,14 @@ class QueueManager:
         job.exit_code = None
         job.duration = None
 
-    async def start_saved_job(self, order_id: str, *, fresh: bool = False) -> tuple:
+    async def start_saved_job(
+        self,
+        order_id: str,
+        *,
+        fresh: bool = False,
+        use_ssd: bool = False,
+        scratch_dir: str | None = None,
+    ) -> tuple:
         """
         SAVED 주문, 또는 FAILED/CANCELLED/COMPLETED 주문(재분석)을 큐에 넣습니다.
         fresh=True 이면 job.params['_pipeline_fresh']=True 를 설정해 플러그인이 캐시 삭제를 수행하게 함.
@@ -516,12 +523,19 @@ class QueueManager:
                 job = self._completed_jobs.pop(order_id)
                 self._prepare_job_for_retry(job)
 
+        job.params = dict(job.params or {})
         if fresh:
-            job.params = dict(job.params or {})
             job.params["_pipeline_fresh"] = True
         else:
-            if job.params and "_pipeline_fresh" in job.params:
-                del job.params["_pipeline_fresh"]
+            job.params.pop("_pipeline_fresh", None)
+
+        if use_ssd:
+            job.params["_use_ssd"] = True
+            if scratch_dir:
+                job.params["_scratch_dir"] = scratch_dir
+        else:
+            job.params.pop("_use_ssd", None)
+            job.params.pop("_scratch_dir", None)
 
         queue_position = await self.enqueue(job)
         return job, queue_position
