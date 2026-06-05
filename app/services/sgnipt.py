@@ -10,6 +10,7 @@ sgnipt_work/fastq 에 레이아웃 fastq 를 마운트. run_sgnipt.sh 는 기본
 Portal 연동: 동일 JSON을 output/.../result.json 으로 복사합니다.
 """
 
+import csv
 import os
 import glob
 import json
@@ -56,6 +57,154 @@ def apply_sgnipt_layout_directories(job: Job) -> bool:
         job.output_dir = new_o
         job.log_dir = new_l
     return changed
+
+
+def sgnipt_host_path_candidates(path: str) -> List[str]:
+    """
+    Map paths between pipeline container mount (/Work/SgNIPT), layout host tree,
+    and SGNIPT_WORK_ROOT so the daemon can see BAMs and samplesheets.
+    """
+    raw = (path or "").strip()
+    if not raw:
+        return []
+    out: List[str] = []
+    seen: Set[str] = set()
+
+    def add(p: str) -> None:
+        if not p:
+            return
+        try:
+            ap = os.path.abspath(p)
+        except OSError:
+            return
+        if ap in seen:
+            return
+        seen.add(ap)
+        out.append(ap)
+
+    add(raw)
+    layout = (settings.sgnipt_layout_root or "").strip()
+    work = (settings.sgnipt_work_root or "").strip()
+    mount = (settings.sgnipt_container_mount_root or "").strip()
+    remap: List[Tuple[str, str]] = []
+    if mount and layout:
+        remap.append((os.path.abspath(mount), os.path.abspath(layout)))
+    if layout and work:
+        la, wa = os.path.abspath(layout), os.path.abspath(work)
+        remap.append((la, wa))
+        remap.append((wa, la))
+    if mount and work:
+        remap.append((os.path.abspath(mount), os.path.abspath(work)))
+    for src_base, dst_base in remap:
+        try:
+            if os.path.commonpath([src_base, os.path.abspath(raw)]) == src_base:
+                add(dst_base + raw[len(src_base) :])
+        except ValueError:
+            continue
+    return out
+
+
+def sgnipt_resolve_visible_path(path: str) -> Optional[str]:
+    for candidate in sgnipt_host_path_candidates(path):
+        if os.path.isfile(candidate) or os.path.isdir(candidate):
+            return candidate
+    return None
+
+
+def sgnipt_artifact_roots(job: Job) -> List[str]:
+    """Directories to search for sgNIPT BAMs (FASTQ runs, BAM-input runs, layout↔work)."""
+    if (job.service_code or "").strip() != "sgnipt":
+        return []
+    roots: List[str] = []
+    seen: Set[str] = set()
+
+    def add_dir(path: Optional[str]) -> None:
+        if not path or not str(path).strip():
+            return
+        for candidate in sgnipt_host_path_candidates(str(path).strip()):
+            if not os.path.isdir(candidate):
+                continue
+            try:
+                key = os.path.realpath(candidate)
+            except OSError:
+                continue
+            if key in seen:
+                continue
+            seen.add(key)
+            roots.append(candidate)
+
+    for attr in ("analysis_dir", "output_dir", "fastq_dir"):
+        add_dir(getattr(job, attr, None))
+
+    wk = str(job.work_dir or "").strip() or "00"
+    oid = str(job.order_id or "").strip()
+    for base in (
+        settings.sgnipt_job_root,
+        (settings.sgnipt_layout_root or "").strip() or None,
+    ):
+        if not base:
+            continue
+        for sub in ("analysis", "output"):
+            add_dir(os.path.join(base, sub, wk, oid))
+
+    data_dir = (settings.sgnipt_data_dir or "").strip()
+    if data_dir:
+        add_dir(data_dir)
+
+    csv_path = (job.params or {}).get("input_bam_csv", "")
+    if isinstance(csv_path, str) and csv_path.strip():
+        csv_vis = sgnipt_resolve_visible_path(csv_path.strip())
+        if csv_vis and os.path.isfile(csv_vis):
+            try:
+                with open(csv_vis, newline="", encoding="utf-8") as fh:
+                    for row in csv.DictReader(fh):
+                        for col in ("bam", "bai"):
+                            cell = (row.get(col) or "").strip()
+                            for host_path in sgnipt_host_path_candidates(cell):
+                                parent = os.path.dirname(host_path)
+                                if parent:
+                                    add_dir(parent)
+            except OSError as e:
+                logger.debug("[sgnipt] samplesheet scan for artifact roots: %s", e)
+    return roots
+
+
+def sgnipt_collect_bam_abs_paths(job: Job) -> List[str]:
+    """Absolute paths to BAMs listed in input_bam_csv (BAM simulation / external BAM mode)."""
+    if (job.service_code or "").strip() != "sgnipt":
+        return []
+    csv_path = (job.params or {}).get("input_bam_csv", "")
+    if not isinstance(csv_path, str) or not csv_path.strip():
+        return []
+    csv_vis = sgnipt_resolve_visible_path(csv_path.strip())
+    if not csv_vis or not os.path.isfile(csv_vis):
+        return []
+    sample = (job.sample_name or job.order_id or "").strip()
+    found: List[str] = []
+    seen_bam: Set[str] = set()
+    try:
+        with open(csv_vis, newline="", encoding="utf-8") as fh:
+            for row in csv.DictReader(fh):
+                sid = (row.get("sample_id") or "").strip()
+                if sample and sid and sid != sample:
+                    continue
+                bam_cell = (row.get("bam") or "").strip()
+                for host_path in sgnipt_host_path_candidates(bam_cell):
+                    if not host_path.lower().endswith(".bam"):
+                        continue
+                    if not os.path.isfile(host_path):
+                        continue
+                    try:
+                        key = os.path.realpath(host_path)
+                    except OSError:
+                        continue
+                    if key in seen_bam:
+                        continue
+                    seen_bam.add(key)
+                    found.append(host_path)
+    except OSError as e:
+        logger.warning("[sgnipt] Could not read BAM samplesheet %s: %s", csv_vis, e)
+    return found
 
 
 def _normalize_ff(ff: dict | None) -> dict | None:
@@ -312,10 +461,12 @@ class SgNIPTPlugin(ServicePlugin):
         return parts
 
     async def get_pipeline_command(self, job: Job) -> str:
-        # SGNIPT_ROOT_DIR must be available as an env var when the command runs
-        # (set in .env.docker and inherited by the subprocess).
         parts = self._pipeline_command_parts(job)
-        return shlex.join(parts)
+        cmd = shlex.join(parts)
+        # Explicitly pin SGNIPT_ROOT_DIR to the daemon's job root so run_sgnipt.sh always
+        # writes analysis/output/log under the same tree that job.output_dir points to.
+        root = shlex.quote(settings.sgnipt_job_root)
+        return f"SGNIPT_ROOT_DIR={root} {cmd}"
 
     async def check_completion(self, job: Job) -> bool:
         path = self._order_result_json(job)

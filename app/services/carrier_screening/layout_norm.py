@@ -106,6 +106,19 @@ def carrier_sequencing_folder(job: Job) -> str:
     return str(job.order_id)
 
 
+def gx_exome_run_container_name(work_dir: str, sample_name: str) -> str:
+    """
+    ``run_analysis.sh`` 의 ``NF_DOCKER_NAME`` 과 동일 (gx-exome-<work>-<sample>).
+    Stop 후 재실행 시 이름 충돌 방지용.
+    """
+    raw = f"gx-exome-{work_dir}-{sample_name}"
+    name = re.sub(r"[^a-zA-Z0-9_.-]", "-", raw)
+    name = re.sub(r"^[-_.]*", "", name)
+    if not name:
+        name = "gx-exome-unknown"
+    return name[:200]
+
+
 def parse_carrier_output_tree_from_main_vcf(main_vcf: str) -> Tuple[str, str]:
     """
     main VCF가 .../output/<work_dir>/<leaf>/vcf/<file>.vcf.gz 에 있을 때

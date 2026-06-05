@@ -33,6 +33,11 @@ from .layout_norm import (
     carrier_run_analysis_work_arg,
     carrier_sequencing_folder,
 )
+from .artifact_dirs import (
+    clear_carrier_fresh_nextflow_cache,
+    ensure_carrier_sample_artifact_dirs,
+    remove_gx_exome_run_container_for_job,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -398,8 +403,8 @@ class CarrierScreeningPlugin(ServicePlugin):
     def validate_params(self, params: Dict[str, Any], strict: bool = True) -> Tuple[bool, str]:
         """서비스별 파라미터 유효성 검사.
 
-        strict=False (Save 단계): wes_panel_id 는 나중에 채울 수 있으므로 건너뜀.
-        strict=True  (Submit/Run 단계): 모든 필수 항목 검사.
+        strict=False (whole_exome Save): wes_panel_id optional at save.
+        strict=True  (carrier/health Save, Submit/Run): Primary panel required.
         """
         carrier = (params or {}).get("carrier") or {}
         if carrier.get("reuse_prior_pipeline_outputs"):
@@ -641,17 +646,29 @@ class CarrierScreeningPlugin(ServicePlugin):
         )
 
         dirs = self._get_dirs(job)
+        work_root = settings.carrier_screening_work_root
+        wk = carrier_run_analysis_work_arg(job)
+        leaf = carrier_sequencing_folder(job)
 
         try:
-            for d in dirs.values():
-                os.makedirs(d, exist_ok=True)
+            ensure_carrier_sample_artifact_dirs(work_root, wk, leaf)
+            fq = dirs.get("fastq") or ""
+            if fq:
+                os.makedirs(fq, mode=0o2775, exist_ok=True)
         except PermissionError as e:
             logger.error(
+                "[carrier_screening] Permission denied creating artifact dirs for %s — %s",
+                job.order_id,
+                e,
+            )
+            raise RuntimeError(str(e)) from e
+        except OSError as e:
+            logger.error(
                 "[carrier_screening] Permission denied creating %s — fix host ownership, set "
-                ".env.compose HOST_UID/HOST_GID to `id -u`/`id -g`, or set CARRIER_SCREENING_ARTIFACT_BASE "
+                "HOST_UID/HOST_GID to `id -u`/`id -g`, or set CARRIER_SCREENING_ARTIFACT_BASE "
                 "to a writable dir under /data (e.g. /data/gx-exome-work) so fastq/analysis/output "
                 "staging is not under a read-only carrier layout tree.",
-                e.filename or dirs,
+                e,
             )
             raise
 
@@ -660,6 +677,25 @@ class CarrierScreeningPlugin(ServicePlugin):
         job.analysis_dir = dirs["analysis"]
         job.output_dir = dirs["output"]
         job.log_dir = dirs["log"]
+
+        # ── BAM direct input mode: skip FASTQ entirely ──────────────────
+        input_bam = (job.params or {}).get("input_bam", "").strip()
+        if input_bam:
+            if not os.path.isfile(input_bam):
+                raise RuntimeError(
+                    f"[carrier_screening] --input-bam: BAM file not found: {input_bam}"
+                )
+            bai = input_bam + ".bai"
+            bai2 = (input_bam[:-4] + ".bai") if input_bam.endswith(".bam") else ""
+            if not os.path.isfile(bai) and not (bai2 and os.path.isfile(bai2)):
+                raise RuntimeError(
+                    f"[carrier_screening] --input-bam: BAM index not found "
+                    f"(expected {bai}). Run: samtools index {input_bam}"
+                )
+            logger.info(
+                "[carrier_screening] BAM direct input mode — %s (skipping FASTQ prep)", input_bam
+            )
+            return True
 
         # Same sequencing run, new order / panel: reuse prior pipeline outputs (no Nextflow)
         if carrier_reuse_prior_pipeline_requested(job):
@@ -674,7 +710,9 @@ class CarrierScreeningPlugin(ServicePlugin):
         # (avoids wrong pairing when multiple sequencing pairs sit in one folder).
         r1e = (job.fastq_r1_path or "").strip()
         r2e = (job.fastq_r2_path or "").strip()
-        if r1e and r2e and os.path.isfile(r1e) and os.path.isfile(r2e):
+        r1_check = self._daemon_accessible_path(r1e)
+        r2_check = self._daemon_accessible_path(r2e)
+        if r1e and r2e and os.path.isfile(r1_check) and os.path.isfile(r2_check):
             perm_err = self._fastq_readable_by_process(r1e, r2e)
             if perm_err:
                 logger.error("[carrier_screening] %s", perm_err)
@@ -725,7 +763,9 @@ class CarrierScreeningPlugin(ServicePlugin):
 
         # 지정된 로컬 경로 확인 (exists but not isfile — e.g. broken symlink)
         if job.fastq_r1_path and job.fastq_r2_path:
-            if os.path.isfile(job.fastq_r1_path) and os.path.isfile(job.fastq_r2_path):
+            r1_check = self._daemon_accessible_path(job.fastq_r1_path)
+            r2_check = self._daemon_accessible_path(job.fastq_r2_path)
+            if os.path.isfile(r1_check) and os.path.isfile(r2_check):
                 perm_err = self._fastq_readable_by_process(
                     job.fastq_r1_path, job.fastq_r2_path
                 )
@@ -753,6 +793,30 @@ class CarrierScreeningPlugin(ServicePlugin):
         raise RuntimeError(msg)
 
     @staticmethod
+    def _daemon_accessible_path(path: str) -> str:
+        """
+        Map host layout paths to the container bind-mount alias for in-process checks.
+
+        Portal orders often store /home/ken/gx-exome/... but gx-daemon reads FASTQs via
+        /data/gx-exome inside the container. Host paths are preserved on the Job for
+        run_analysis.sh nested docker -v.
+        """
+        p = (path or "").strip()
+        if not p:
+            return p
+        if p == _GX_EXOME_LAYOUT_PREFIX or p.startswith(_GX_EXOME_LAYOUT_PREFIX + "/"):
+            return p
+        host = (settings.carrier_screening_host or "").strip().rstrip("/")
+        if not host:
+            return p
+        if p == host or p.startswith(host + "/"):
+            suffix = p[len(host):].lstrip("/")
+            alias = _GX_EXOME_LAYOUT_PREFIX if not suffix else f"{_GX_EXOME_LAYOUT_PREFIX}/{suffix}"
+            if os.path.exists(alias):
+                return alias
+        return p
+
+    @staticmethod
     def _fastq_readable_by_process(r1: str, r2: str) -> Optional[str]:
         """
         Return an error message if FASTQs exist but cannot be read by this process.
@@ -762,22 +826,30 @@ class CarrierScreeningPlugin(ServicePlugin):
         """
         import stat as stat_mod
 
-        for label, p in (("R1", r1), ("R2", r2)):
-            if not p or not str(p).strip():
+        for label, orig in (("R1", r1), ("R2", r2)):
+            if not orig or not str(orig).strip():
                 return f"{label} FASTQ path is empty"
+            p = CarrierScreeningPlugin._daemon_accessible_path(orig)
             if not os.path.isfile(p):
-                return f"{label} FASTQ not found: {p}"
-            if not os.access(p, os.R_OK):
-                try:
-                    st = os.stat(p)
-                    mode = stat_mod.filemode(st.st_mode)
-                except OSError:
-                    mode = "?"
+                return f"{label} FASTQ not found: {orig}"
+            if os.access(p, os.R_OK):
+                continue
+            parent = os.path.dirname(p)
+            try:
+                st = os.stat(p)
+                mode = stat_mod.filemode(st.st_mode)
+            except OSError:
+                mode = "?"
+            if not os.access(parent, os.X_OK):
                 return (
-                    f"{label} FASTQ not readable by the daemon user ({mode}): {p}. "
-                    "On the host: chmod a+r (or chown to HOST_UID from .env.compose), "
-                    "or chmod g+rX and run the daemon as a user in the file's group."
+                    f"{label} FASTQ not accessible (parent directory not traversable): {orig}. "
+                    "Inside gx-daemon use /data/gx-exome/... paths or set "
+                    "CARRIER_SCREENING_FASTQ_DIR=/data/gx-exome/fastq."
                 )
+            return (
+                f"{label} FASTQ not readable by the daemon user ({mode}): {orig}. "
+                "On the host: chmod 644 (or a+r) on the FASTQ files, or chown to HOST_UID from .env."
+            )
         return None
 
     def _find_fastq_files(self, fastq_dir: str, sample_name: str) -> Tuple[Optional[str], Optional[str]]:
@@ -901,7 +973,7 @@ class CarrierScreeningPlugin(ServicePlugin):
         d = (settings.carrier_screening_script_data_dir or "").strip()
         if d:
             return d
-        host = os.environ.get("CARRIER_SCREENING_HOST", "").strip()
+        host = (settings.carrier_screening_host or "").strip()
         layout = settings.carrier_screening_layout_base
         if host and layout.startswith(_GX_EXOME_LAYOUT_PREFIX):
             suffix = layout[len(_GX_EXOME_LAYOUT_PREFIX) :].lstrip("/")
@@ -1045,6 +1117,7 @@ class CarrierScreeningPlugin(ServicePlugin):
         work_arg = carrier_run_analysis_work_arg(job)
         carrier_params = (job.params or {}).get("carrier") or {}
         capture_panel = (carrier_params.get("capture_panel_id") or "").strip() or "twist-exome2"
+        input_bam = (job.params or {}).get("input_bam", "").strip()
 
         # Prior-reuse Force Run: use the original FASTQ folder directly instead of creating
         # symlinks. The fastq_dir stored on the job points to the prior order's FASTQ tree;
@@ -1068,14 +1141,15 @@ class CarrierScreeningPlugin(ServicePlugin):
         # FASTQ가 예상 위치({data_dir}/fastq/{work}/{order_id}/)에 없으면 심볼릭 링크 생성.
         # 같은 fastq/ 트리 내의 상대 링크이므로 docker DinD 마운트에서도 정상 작동.
         fastq_dir = os.path.join(data_dir, "fastq", work_arg, sample_folder)
-        self._ensure_fastq_symlinks(job, fastq_dir)
+        if not input_bam:
+            self._ensure_fastq_symlinks(job, fastq_dir)
 
-        if not os.path.isdir(fastq_dir):
-            raise FileNotFoundError(
-                f"[carrier_screening] FASTQ directory not found: {fastq_dir}\n"
-                f"  order_id='{job.order_id}', --sample='{sample_folder}'\n"
-                f"  FASTQ를 {fastq_dir}/ 에 위치시키거나 fastq_r1_path/r2_path 를 지정하세요."
-            )
+            if not os.path.isdir(fastq_dir):
+                raise FileNotFoundError(
+                    f"[carrier_screening] FASTQ directory not found: {fastq_dir}\n"
+                    f"  order_id='{job.order_id}', --sample='{sample_folder}'\n"
+                    f"  FASTQ를 {fastq_dir}/ 에 위치시키거나 fastq_r1_path/r2_path 를 지정하세요."
+                )
 
         parts = [
             _bash_executable(),
@@ -1101,9 +1175,12 @@ class CarrierScreeningPlugin(ServicePlugin):
 
         is_fresh = bool((job.params or {}).get("_pipeline_fresh"))
         logger.info(
-            "[carrier_screening] _shell_command_run_analysis: order=%s sample=%s panel=%s bed=%s fresh=%s",
-            job.order_id, sample_folder, capture_panel, bed_path or "(--panel fallback)", is_fresh,
+            "[carrier_screening] _shell_command_run_analysis: order=%s sample=%s panel=%s bed=%s bam=%s fresh=%s",
+            job.order_id, sample_folder, capture_panel, bed_path or "(--panel fallback)",
+            input_bam or "(FASTQ mode)", is_fresh,
         )
+        if input_bam:
+            parts += ["--input-bam", input_bam]
         if is_fresh:
             parts.append("--fresh")
             # Live Nextflow process table (shows each process; cached tasks appear as CACHED in trace/log).
@@ -1294,6 +1371,13 @@ class CarrierScreeningPlugin(ServicePlugin):
                     f"Carrier run script not found: {script_path!r} "
                     "(mount gx-exome at /data/gx-exome or set CARRIER_SCREENING_RUN_SCRIPT)"
                 )
+            if (job.params or {}).get("_pipeline_fresh"):
+                clear_carrier_fresh_nextflow_cache(
+                    self._run_analysis_data_dir(),
+                    carrier_run_analysis_work_arg(job),
+                    carrier_sequencing_folder(job),
+                )
+            remove_gx_exome_run_container_for_job(job)
             cmd = self._shell_command_run_analysis(job, script_path)
             logger.info(
                 "[carrier_screening] Using run script %s: %s",

@@ -9,17 +9,19 @@ services:
         HOST_GID: ${HOST_GID}
         DOCKER_GID: ${DOCKER_GID}
     image: gx-daemon:latest
-    container_name: ${APP_ENV:-prod}-gx-daemon
+    container_name: ${APP_ENV}-gx-daemon
     restart: unless-stopped
 
     env_file:
-      - path: .env
-        required: true
+      - ${ENV_FILE:-.env}
 
-    command: /bin/sh -c "uvicorn app.main:app --host 0.0.0.0 --port $${APP_PORT:-8000} --no-access-log"
+    environment:
+      CARRIER_SCREENING_HOST: ${CARRIER_SCREENING_HOST:-/home/ken/gx-exome}
+
+    command: /bin/sh -c "uvicorn app.main:app --host 0.0.0.0 --port $${APP_PORT:-8000} --no-access-log >> /app/logs/$$(date +%Y%m%d).log 2>&1"
 
     ports:
-      - "${HOST_PORT:-8000}:${APP_PORT:-8000}"
+      - "${HOST_PORT}:${APP_PORT:-8000}"
 
     user: "${HOST_UID}:${HOST_GID}"
     group_add:
@@ -34,12 +36,14 @@ services:
       - ${CARRIER_SCREENING_HOST:-/home/ken/gx-exome}:${CARRIER_SCREENING_HOST:-/home/ken/gx-exome}
       - ${BASE_DIR:-/data}/reference:/data/reference:ro
       - ${CARRIER_SCREENING_PIPELINE_DIR:-/opt/pipelines/carrier-screening}:/opt/pipelines/carrier-screening:ro
+      - ${NIPT_PIPELINE_DIR:-/home/ken/gx-nipt}:${NIPT_PIPELINE_DIR:-/home/ken/gx-nipt}:ro
       - ${SGNIPT_SRC_HOST:-/home/ken/sgnipt}:${SGNIPT_SRC_HOST:-/home/ken/sgnipt}:ro
       - ${SGNIPT_LAYOUT_HOST:-/home/ken/sgNIPT}:${SGNIPT_LAYOUT_HOST:-/home/ken/sgNIPT}
       - ${SGNIPT_LAYOUT_HOST:-/home/ken/sgNIPT}/data:${BASE_DIR:-/data}/sgnipt_work/data:ro
       - ${SGNIPT_LAYOUT_HOST:-/home/ken/sgNIPT}/config:${BASE_DIR:-/data}/sgnipt_work/config:ro
       - ${SGNIPT_LAYOUT_HOST:-/home/ken/sgNIPT}/fastq:${BASE_DIR:-/data}/sgnipt_work/fastq
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./session/${APP_ENV}:/app/logs
 
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:$${APP_PORT:-8000}/health || exit 1"]

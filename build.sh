@@ -1,21 +1,19 @@
 #!/usr/bin/env bash
-# 프로덕션 이미지 빌드 + 서비스 기동/관리 (docker-compose.yml)
-# 사용 전: cp .env.compose.example .env.compose && 편집
+# prod 기동/관리 (nipt-daemon deploy.sh / Makefile run-prod 와 동일 계열)
 #
 # 사용법:
-#   ./build.sh              # 이미지 빌드만
-#   ./build.sh up           # 이미지 빌드 + 컨테이너 기동
-#   ./build.sh down         # 컨테이너 중지 및 제거
-#   ./build.sh restart      # down → build → up
-#   ./build.sh logs         # 실시간 로그 조회
-#   ./build.sh status       # 컨테이너 상태 확인
+#   ./build.sh              # prod 이미지 빌드만
+#   ./build.sh up           # make run-prod 와 동일
+#   ./build.sh down         # make down-prod
+#   ./build.sh restart      # down → up
+#   ./build.sh logs         # docker logs prod-gx-daemon
+#   ./build.sh status       # compose ps
 set -euo pipefail
 cd "$(dirname "$0")"
 
-if [[ ! -f .env.compose ]]; then
-  echo "Missing .env.compose — copy and edit:"
-  echo "  cp .env.compose.example .env.compose"
-  echo "Set HOST_UID, HOST_GID, DOCKER_GID from: id -u; id -g; getent group docker"
+if [[ ! -f .env ]]; then
+  echo "Missing .env — copy and edit:"
+  echo "  cp .env.example .env"
   exit 1
 fi
 
@@ -23,25 +21,23 @@ CMD="${1:-build}"
 
 case "$CMD" in
   build)
-    docker compose --env-file .env.compose up --build --no-start
+    ENV_FILE=.env docker compose -p prod --env-file .env build
     ;;
   up)
-    docker compose --env-file .env.compose up -d --build
-    docker compose --env-file .env.compose ps
+    make run-prod
     ;;
   down)
-    docker compose --env-file .env.compose down
+    make down-prod
     ;;
   restart)
-    docker compose --env-file .env.compose down
-    docker compose --env-file .env.compose up -d --build
-    docker compose --env-file .env.compose ps
+    make down-prod
+    make run-prod
     ;;
   logs)
-    docker compose --env-file .env.compose logs -f
+    make logs-prod
     ;;
   status)
-    docker compose --env-file .env.compose ps
+    docker compose -p prod ps
     ;;
   *)
     echo "Usage: $0 [build|up|down|restart|logs|status]" >&2

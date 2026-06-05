@@ -4,6 +4,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+!.env.dev.example
 *.db
 *.sqlite3
 logs/

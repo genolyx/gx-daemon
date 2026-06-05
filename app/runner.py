@@ -356,7 +356,22 @@ class PipelineRunner:
         # 로그 디렉토리 생성
         log_file = _pipeline_log_path(job)
         log_dir = os.path.dirname(log_file)
-        os.makedirs(log_dir, exist_ok=True)
+        if job.service_code in ("carrier_screening", "whole_exome", "health_screening"):
+            from .services.carrier_screening.artifact_dirs import (
+                ensure_carrier_sample_artifact_dirs,
+            )
+            from .services.carrier_screening.layout_norm import (
+                carrier_run_analysis_work_arg,
+                carrier_sequencing_folder,
+            )
+
+            ensure_carrier_sample_artifact_dirs(
+                settings.carrier_screening_work_root,
+                carrier_run_analysis_work_arg(job),
+                carrier_sequencing_folder(job),
+            )
+        else:
+            os.makedirs(log_dir, exist_ok=True)
         
         logger.info(f"[{job.service_code}] Running pipeline, log: {log_file}")
 
@@ -530,6 +545,14 @@ class PipelineRunner:
 
     async def cancel_job(self, order_id: str) -> bool:
         """실행 중인 파이프라인 서브프로세스에 SIGTERM. 없으면 False."""
+        job = self._queue_manager.get_job(order_id)
+        if job:
+            from .services.carrier_screening.artifact_dirs import (
+                remove_gx_exome_run_container_for_job,
+            )
+
+            remove_gx_exome_run_container_for_job(job)
+
         process = self._active_processes.get(order_id)
         if process and process.returncode is None:
             self._user_cancelled.add(order_id)

@@ -73,7 +73,11 @@ class Settings(BaseSettings):
     fastq_base_dir: str = Field(default="/data/fastq")
 
     # ─── Carrier Screening ─────────────────────────────────
-    carrier_screening_fastq_dir: str = Field(default="/home/ken/gx-exome/fastq")
+    carrier_screening_host: Optional[str] = Field(
+        default="/home/ken/gx-exome",
+        description="Host path to gx-exome repo (compose bind-mount source; nested docker -v)",
+    )
+    carrier_screening_fastq_dir: str = Field(default="/data/gx-exome/fastq")
     analysis_base_dir: str = Field(default="/data/analysis")
     output_base_dir: str = Field(default="/data/output")
     log_base_dir: str = Field(default="/data/log")

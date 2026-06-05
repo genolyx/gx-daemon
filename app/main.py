@@ -393,6 +393,25 @@ def _order_artifact_roots(job: Job) -> List[str]:
             out.append(root)
     except Exception:
         pass
+    if (job.service_code or "").strip() == "sgnipt":
+        try:
+            from .services.sgnipt import sgnipt_artifact_roots
+
+            for root in sgnipt_artifact_roots(job):
+                if not root:
+                    continue
+                try:
+                    key = os.path.realpath(root)
+                except OSError:
+                    continue
+                if not os.path.isdir(root):
+                    continue
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(root)
+        except Exception:
+            pass
     return out
 
 
@@ -469,6 +488,21 @@ _ANCILLARY_BAM_TOKENS = (
     "hba_aln", "hba_realigned", "no_dup", "nodup", "no-dup", "pre_dedup", "before_dedup",
 )
 _ANCILLARY_BAM_SUFFIXES = ("_realigned_old.bam", "_realigned_tagged.bam")
+# Nextflow work/ and vendored test fixtures — not sample alignments for IGV.
+_SPURIOUS_BAM_PATH_MARKERS = (
+    "/work/",
+    "site-packages",
+    "tests/resources",
+    "/aldy/",
+    "node_modules",
+    "/.local/lib/",
+    "/.venv/",
+)
+
+
+def _is_spurious_bam_rel(rel: str) -> bool:
+    r = (rel or "").lower().replace("\\", "/")
+    return any(m in r for m in _SPURIOUS_BAM_PATH_MARKERS)
 
 
 def _is_ancillary_bam(basename: str) -> bool:
@@ -509,17 +543,123 @@ def _order_file_rel_from_abs_bam(job: Job, bam_abs: str) -> Optional[Dict[str, A
             rel = os.path.relpath(bam_abs, root).replace("\\", "/")
         except ValueError:
             continue
-        if ".." in rel:
+        if ".." in rel or _is_spurious_bam_rel(rel):
             continue
-        bai = bam_abs + ".bai"
         index_rel: Optional[str] = None
-        if os.path.isfile(bai):
+        bai_candidates = [bam_abs + ".bai"]
+        if bam_abs.lower().endswith(".bam"):
+            bai_candidates.append(bam_abs[:-4] + ".bai")
+        for bai_abs in bai_candidates:
+            if not os.path.isfile(bai_abs):
+                continue
             try:
-                index_rel = os.path.relpath(bai, root).replace("\\", "/")
+                index_rel = os.path.relpath(bai_abs, root).replace("\\", "/")
             except ValueError:
                 index_rel = None
+            if index_rel:
+                break
         return {"rel_path": rel, "label": os.path.basename(bam_abs),
                 "has_index": bool(index_rel), "index_rel_path": index_rel}
+    return None
+
+
+def _sgnipt_bam_tracks_for_sample(job: Job, tracks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """When several sim BAMs share data/test/sim_bam, keep only this order's sample."""
+    sample = (job.sample_name or job.order_id or "").strip()
+    if not sample:
+        return tracks
+    key = sample.lower()
+    matched = [
+        t
+        for t in tracks
+        if key in (t.get("label") or "").lower() or key in (t.get("rel_path") or "").lower()
+    ]
+    return matched if matched else tracks
+
+
+def _prioritize_sgnipt_bam_tracks(tracks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    sgNIPT publishes {sample}.target.bam and {sample}.dedup.bam under alignment/
+    (not carrier-style *.md.bam). Prefer target BAM for panel/coverage IGV; drop Nextflow work/ copies.
+    """
+    def sort_key(t: Dict[str, Any]) -> tuple:
+        rel = (t.get("rel_path") or "").lower()
+        if "/work/" in rel:
+            return (99, rel)
+        score = 50
+        if "/alignment/" in rel or rel.startswith("alignment/"):
+            score -= 20
+        if rel.endswith(".target.bam"):
+            score -= 10
+        elif rel.endswith(".dedup.bam"):
+            score -= 5
+        elif rel.endswith(".sorted.bam"):
+            score += 5
+        return (score, rel)
+
+    filtered = [t for t in tracks if "/work/" not in (t.get("rel_path") or "").lower()]
+    pool = filtered if filtered else list(tracks)
+    return sorted(pool, key=sort_key)
+
+
+def _prioritize_carrier_bam_tracks(tracks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Prefer published alignment/*.md.bam; drop Nextflow work/ and vendored test BAMs."""
+    pool = [t for t in tracks if not _is_spurious_bam_rel(t.get("rel_path") or "")]
+    if not pool:
+        pool = list(tracks)
+    non_work = [t for t in pool if "/work/" not in (t.get("rel_path") or "").lower()]
+    if non_work:
+        pool = non_work
+
+    def sort_key(t: Dict[str, Any]) -> tuple:
+        rel = (t.get("rel_path") or "").lower()
+        score = 50
+        if rel.startswith("alignment/") or "/alignment/" in rel:
+            score -= 30
+        if rel.endswith(".md.bam"):
+            score -= 25
+        elif rel.endswith(".pb.bam"):
+            score -= 20
+        if "/work/" in rel:
+            score += 40
+        return (score, rel)
+
+    return sorted(pool, key=sort_key)
+
+
+def _sgnipt_fallback_bam_track(job: Job) -> Optional[Dict[str, Any]]:
+    """Resolve published alignment BAM when directory walk finds nothing (e.g. path normalization)."""
+    sample = (job.sample_name or job.order_id or "").strip()
+    if not sample:
+        return None
+    rel_candidates = (
+        f"alignment/{sample}.target.bam",
+        f"{sample}/alignment/{sample}.target.bam",
+        f"alignment/{sample}.dedup.bam",
+        f"{sample}/alignment/{sample}.dedup.bam",
+    )
+    roots: List[str] = []
+    if (job.service_code or "").strip() == "sgnipt":
+        try:
+            from .services.sgnipt import sgnipt_artifact_roots
+
+            roots.extend(sgnipt_artifact_roots(job))
+        except Exception:
+            pass
+    for attr in ("analysis_dir", "output_dir"):
+        p = (getattr(job, attr, None) or "").strip()
+        if p and os.path.isdir(p) and p not in roots:
+            roots.append(p)
+    for r in _order_artifact_roots(job):
+        if r and os.path.isdir(r) and r not in roots:
+            roots.append(r)
+    for root in roots:
+        for rel in rel_candidates:
+            hit = _safe_order_file_path(root, rel)
+            if hit:
+                track = _order_file_rel_from_abs_bam(job, hit)
+                if track:
+                    return _annotate_bam_track_ancillary(job, track)
     return None
 
 
@@ -558,6 +698,12 @@ def _list_order_bam_tracks(job: Job, cap: int = 32) -> List[Dict[str, Any]]:
                     if rp in seen_real:
                         continue
                     seen_real.add(rp)
+                    try:
+                        rel_check = os.path.relpath(fp, root).replace("\\", "/")
+                    except ValueError:
+                        rel_check = ""
+                    if _is_spurious_bam_rel(rel_check):
+                        continue
                     track = _order_file_rel_from_abs_bam(job, fp)
                     if track:
                         track = _annotate_bam_track_ancillary(job, track)
@@ -567,6 +713,24 @@ def _list_order_bam_tracks(job: Job, cap: int = 32) -> List[Dict[str, Any]]:
                 if len(out) >= cap:
                     break
         except OSError:
+            pass
+    if (job.service_code or "").strip() == "sgnipt":
+        try:
+            from .services.sgnipt import sgnipt_collect_bam_abs_paths
+
+            for bam_abs in sgnipt_collect_bam_abs_paths(job):
+                try:
+                    rp = os.path.realpath(bam_abs)
+                except OSError:
+                    continue
+                if rp in seen_real:
+                    continue
+                seen_real.add(rp)
+                track = _order_file_rel_from_abs_bam(job, bam_abs)
+                if track:
+                    track = _annotate_bam_track_ancillary(job, track)
+                    out.append(track)
+        except Exception:
             pass
     return out
 
@@ -794,7 +958,12 @@ async def access_key_guard(request: Request, call_next):
     expected = f"Bearer {ACCESS_KEY}"
     received = request.headers.get("Authorization", "")
     api_key = request.headers.get("X-API-Key", "")
-    if hmac.compare_digest(received, expected) or hmac.compare_digest(api_key, ACCESS_KEY):
+    api_key_qp = request.query_params.get("api_key", "")
+    if (
+        hmac.compare_digest(received, expected)
+        or hmac.compare_digest(api_key, ACCESS_KEY)
+        or (api_key_qp and hmac.compare_digest(api_key_qp, ACCESS_KEY))
+    ):
         return await call_next(request)
     logger.warning("Forbidden request: invalid or missing Authorization header")
     return JSONResponse(status_code=403, content={"detail": "Forbidden"})
@@ -945,8 +1114,13 @@ async def _enqueue_nipt_order(qm, order_id: str, od, dto, job: Job):
 async def save_order(service_code: str, req: OrderSubmitRequest = Body(...)):
     """Save order without queueing (for local development / review)."""
     qm = get_queue_manager()
-    if service_code not in settings.enabled_service_list:
+    plugin = get_plugin(service_code)
+    if not plugin:
         raise HTTPException(400, f"Unknown service_code: {service_code}")
+    save_strict = service_code in ("carrier_screening", "health_screening")
+    is_valid, error_msg = plugin.validate_params(req.params or {}, strict=save_strict)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=f"Invalid params: {error_msg}")
 
     job = Job(
         order_id=req.order_id,
@@ -2101,13 +2275,63 @@ async def get_order_coverage_context(order_id: str):
         from .services.wes_panels import interpretation_gene_set_for_job
         genes = sorted(interpretation_gene_set_for_job(job))
     bams_all = _list_order_bam_tracks(job)
+    bams_all = [t for t in bams_all if not _is_spurious_bam_rel(t.get("rel_path") or "")]
     bams_igv = [t for t in bams_all if not t.get("ancillary")]
+    if (job.service_code or "").strip() in _CARRIER_LIKE:
+        bams_igv = _prioritize_carrier_bam_tracks(bams_igv)
+        non_work_igv = [t for t in bams_igv if "/work/" not in (t.get("rel_path") or "").lower()]
+        if non_work_igv:
+            bams_igv = non_work_igv
+        deduped_c: List[Dict[str, Any]] = []
+        seen_c: set = set()
+        for t in bams_igv:
+            rel = (t.get("rel_path") or "").strip()
+            if rel and rel in seen_c:
+                continue
+            if rel:
+                seen_c.add(rel)
+            deduped_c.append(t)
+        bams_igv = deduped_c
+    if job.service_code == "sgnipt":
+        bams_igv = _sgnipt_bam_tracks_for_sample(job, bams_igv)
+        bams_igv = _prioritize_sgnipt_bam_tracks(bams_igv)
+        deduped: List[Dict[str, Any]] = []
+        seen_rel: set = set()
+        for t in bams_igv:
+            rel = (t.get("rel_path") or "").strip()
+            if rel and rel in seen_rel:
+                continue
+            if rel:
+                seen_rel.add(rel)
+            deduped.append(t)
+        bams_igv = deduped
+        if not bams_igv:
+            fb = _sgnipt_fallback_bam_track(job)
+            if fb and not fb.get("ancillary"):
+                bams_igv = [fb]
     ctx: Dict[str, Any] = {
         "order_id": order_id, "interpretation_genes": genes,
         "bam_tracks": bams_igv, "genome_id": "hg38",
     }
+    if job.service_code == "sgnipt" and bams_igv:
+        primary = (bams_igv[0].get("rel_path") or "").lower()
+        if primary.endswith(".target.bam"):
+            ctx["igv_bam_hint"] = "Using panel target BAM (alignment/*.target.bam) for coverage IGV."
+        elif primary.endswith(".dedup.bam"):
+            ctx["igv_bam_hint"] = "Using mark-duplicated BAM (alignment/*.dedup.bam); sgNIPT does not emit *.md.bam."
     if bams_all and not bams_igv:
         ctx["igv_bam_message"] = "Only ancillary BAMs found; they are not used for auto-IGV."
+    elif (job.service_code or "").strip() in _CARRIER_LIKE and not bams_igv:
+        ctx["igv_bam_message"] = (
+            "No indexed exome BAM found (expected alignment/*.md.bam or *.pb.bam). "
+            "Nextflow work/ cache paths are ignored for IGV."
+        )
+    elif job.service_code == "sgnipt" and not bams_igv:
+        ctx["igv_bam_message"] = (
+            "No indexed BAM visible to the daemon. FASTQ runs: analysis/.../alignment/{sample_id}.target.bam; "
+            "BAM-input runs: path from params.input_bam_csv (under data/…). "
+            "Check SGNIPT_LAYOUT_HOST / SGNIPT_WORK_ROOT mounts and that a .bai exists beside the BAM."
+        )
     if (job.params or {}).get("_prior_reuse"):
         pid = (job.params or {}).get("_prior_reuse_order_id")
         if isinstance(pid, str) and pid.strip():
@@ -2234,20 +2458,36 @@ async def get_order_pipeline_log(
     order_id: str,
     max_bytes: int = Query(default=524_288, ge=4096, le=4_194_304, description="Max bytes from end of log"),
 ):
-    """Return pipeline.log content as plain text."""
+    """Return pipeline log (nextflow.log for gx-exome/sgNIPT, else pipeline.log) as plain text."""
+    from .pipeline_log_path import resolve_order_pipeline_log
+
     qm = get_queue_manager()
     job = qm.get_job(order_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Order not found: {order_id}")
-    log_dir = job.log_dir
-    if not log_dir:
-        raise HTTPException(status_code=404, detail="log_dir not set for this order")
-    log_dir_real = os.path.realpath(log_dir)
-    file_path = os.path.realpath(os.path.join(log_dir, "pipeline.log"))
-    if not file_path.startswith(log_dir_real + os.sep):
+    file_path, log_name = resolve_order_pipeline_log(job)
+    if not file_path:
+        raise HTTPException(
+            status_code=404,
+            detail=f"{log_name} not found (pipeline may not have started yet)",
+        )
+    file_real = os.path.realpath(file_path)
+    allowed_roots = {
+        os.path.realpath(p)
+        for p in (
+            (job.log_dir or "").strip(),
+            settings.carrier_screening_layout_base,
+            settings.carrier_screening_host or "",
+            settings.carrier_screening_script_data_dir or "",
+            settings.sgnipt_job_root,
+            settings.sgnipt_layout_root,
+        )
+        if (p or "").strip()
+    }
+    if not any(
+        file_real == root or file_real.startswith(root + os.sep) for root in allowed_roots
+    ):
         raise HTTPException(status_code=400, detail="invalid log path")
-    if not os.path.isfile(file_path):
-        raise HTTPException(status_code=404, detail="pipeline.log not found (pipeline may not have started yet)")
     try:
         size = os.path.getsize(file_path)
         with open(file_path, "rb") as f:
@@ -2259,8 +2499,12 @@ async def get_order_pipeline_log(
                 raw = f.read()
         text = raw.decode("utf-8", errors="replace")
     except OSError as e:
-        raise HTTPException(status_code=500, detail=f"cannot read pipeline.log: {e}")
-    return PlainTextResponse(content=text, media_type="text/plain; charset=utf-8")
+        raise HTTPException(status_code=500, detail=f"cannot read {log_name}: {e}")
+    return PlainTextResponse(
+        content=text,
+        media_type="text/plain; charset=utf-8",
+        headers={"X-Pipeline-Log-File": log_name},
+    )
 
 
 # ══════════════════════════════════════════════════════════════
