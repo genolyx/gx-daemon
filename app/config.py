@@ -250,6 +250,7 @@ class Settings(BaseSettings):
     # ─── sgNIPT (kept for plugin compatibility) ────────────
     sgnipt_fastq_dir: str = Field(default="/home/ken/sgNIPT/fastq")
     sgnipt_data_dir: str = Field(default="/home/ken/sgNIPT/data")
+    sgnipt_config_dir: str = Field(default="/home/ken/sgNIPT/config")
     sgnipt_layout_root: str = Field(default="/home/ken/sgNIPT")
     sgnipt_work_root: Optional[str] = Field(default=None)
     sgnipt_docker_image: str = Field(default="sgnipt")

@@ -550,8 +550,10 @@ class PipelineRunner:
             from .services.carrier_screening.artifact_dirs import (
                 remove_gx_exome_run_container_for_job,
             )
+            from .services.sgnipt import remove_sgnipt_run_container_for_job
 
             remove_gx_exome_run_container_for_job(job)
+            remove_sgnipt_run_container_for_job(job)
 
         process = self._active_processes.get(order_id)
         if process and process.returncode is None:

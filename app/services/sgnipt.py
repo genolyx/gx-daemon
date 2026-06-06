@@ -15,8 +15,10 @@ import os
 import glob
 import json
 import logging
+import re
 import shlex
 import shutil
+import subprocess
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .base import ServicePlugin
@@ -24,6 +26,46 @@ from app.config import settings
 from app.models import Job, OutputFile
 
 logger = logging.getLogger(__name__)
+
+
+def sgnipt_run_container_name(order_id: str) -> str:
+    """``run_sgnipt.sh`` CONTAINER_NAME 와 동일 (order_id 경로는 원본 유지)."""
+    raw = (order_id or "").strip()
+    name = re.sub(r"[^a-zA-Z0-9_.-]", "-", raw)
+    name = re.sub(r"^[-_.]*", "", name)
+    if not name:
+        name = "sgnipt-unknown"
+    return name[:200]
+
+
+def remove_sgnipt_run_container_for_job(job: Job) -> bool:
+    if job.service_code != "sgnipt":
+        return False
+    if not shutil.which("docker") or not os.path.exists("/var/run/docker.sock"):
+        return False
+    name = sgnipt_run_container_name(job.order_id or "")
+    try:
+        listed = subprocess.run(
+            ["docker", "ps", "-aq", "-f", f"name=^{name}$"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        if not (listed.stdout or "").strip():
+            return False
+        subprocess.run(
+            ["docker", "rm", "-f", name],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=True,
+        )
+        logger.info("[sgnipt] Removed stale run container: %s", name)
+        return True
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+        logger.warning("[sgnipt] Failed to remove run container %s: %s", name, e)
+        return False
 
 
 def apply_sgnipt_layout_directories(job: Job) -> bool:
@@ -460,13 +502,44 @@ class SgNIPTPlugin(ServicePlugin):
             parts.append("--fresh")
         return parts
 
+    @staticmethod
+    def _run_sgnipt_shell_env(job: Job) -> str:
+        """
+        Host paths for run_sgnipt.sh nested ``docker run -v``.
+
+        SGNIPT_ROOT_DIR may be /data/sgnipt_work inside gx-daemon; data/config/fastq
+        must use layout host paths so the host Docker daemon bind-mounts the real trees.
+
+        When job FASTQ lives outside SGNIPT_FASTQ_DIR (e.g. symlinks pointing to
+        gx-exome/fastq), pass SGNIPT_FASTQ_EXTRA_VOLUME so the nested docker run can
+        follow those symlinks — mirrors run_analysis.sh INPUT_BAM_MOUNT_ARGS pattern.
+        """
+        parts = [
+            f"SGNIPT_ROOT_DIR={shlex.quote(settings.sgnipt_job_root)}",
+            f"SGNIPT_DATA_DIR={shlex.quote(settings.sgnipt_data_dir)}",
+            f"SGNIPT_CONFIG_DIR={shlex.quote(settings.sgnipt_config_dir)}",
+            f"SGNIPT_FASTQ_DIR={shlex.quote(settings.sgnipt_fastq_dir)}",
+        ]
+
+        r1 = (job.fastq_r1_path or "").strip()
+        if r1:
+            r1_real = os.path.realpath(r1) if os.path.exists(r1) else r1
+            r1_dir = os.path.dirname(os.path.abspath(r1_real))
+            fq_host = os.path.abspath((settings.sgnipt_fastq_dir or "").strip().rstrip("/"))
+            if fq_host and not r1_dir.startswith(fq_host):
+                extra = f"{r1_dir}:{r1_dir}:ro"
+                parts.append(f"SGNIPT_FASTQ_EXTRA_VOLUME={shlex.quote(extra)}")
+                logger.info(
+                    "[sgnipt] FASTQ outside SGNIPT_FASTQ_DIR — adding extra volume: %s", r1_dir
+                )
+
+        return " ".join(parts)
+
     async def get_pipeline_command(self, job: Job) -> str:
+        remove_sgnipt_run_container_for_job(job)
         parts = self._pipeline_command_parts(job)
         cmd = shlex.join(parts)
-        # Explicitly pin SGNIPT_ROOT_DIR to the daemon's job root so run_sgnipt.sh always
-        # writes analysis/output/log under the same tree that job.output_dir points to.
-        root = shlex.quote(settings.sgnipt_job_root)
-        return f"SGNIPT_ROOT_DIR={root} {cmd}"
+        return f"{self._run_sgnipt_shell_env(job)} {cmd}"
 
     async def check_completion(self, job: Job) -> bool:
         path = self._order_result_json(job)
