@@ -788,6 +788,79 @@ class SgNIPTPlugin(ServicePlugin):
         logger.info("[sgnipt] Output files for upload: %s", len(files))
         return files
 
+    async def generate_report(
+        self,
+        job: Job,
+        confirmed_variants: list,
+        reviewer_info: dict,
+        patient_info: Optional[dict] = None,
+        partner_info: Optional[dict] = None,
+        languages: Optional[List[str]] = None,
+        **kwargs,
+    ) -> List[str]:
+        """
+        Generate sgNIPT report PDF(s) from reviewer-confirmed variants.
+
+        1. Locate result.json for this order.
+        2. Build report.json (generate_sgnipt_report_json).
+        3. Render WeasyPrint PDF(s) per language (generate_sgnipt_report_pdf).
+        4. Return list of generated file paths (report.json + PDFs).
+        """
+        import asyncio
+
+        from .sgnipt_report import (
+            generate_sgnipt_report_json,
+            generate_sgnipt_report_pdf,
+        )
+
+        output_dir = job.output_dir or ""
+        result_json_path = os.path.join(output_dir, "result.json")
+        if not os.path.isfile(result_json_path):
+            # Try order-level JSON
+            oid = (job.order_id or "").strip()
+            candidate = os.path.join(output_dir, f"{oid}.json")
+            if os.path.isfile(candidate):
+                result_json_path = candidate
+            else:
+                raise FileNotFoundError(
+                    f"[sgnipt] result.json not found for order {job.order_id} "
+                    f"(checked {output_dir})"
+                )
+
+        langs = languages or ["EN"]
+        db_path = (getattr(settings, "gene_knowledge_db", None) or "").strip() or None
+        gemini_key = (getattr(settings, "gemini_api_key", None) or "").strip() or None
+        gemini_model = getattr(settings, "gene_knowledge_gemini_model", "gemini-2.5-flash")
+
+        primary_lang = langs[0].upper() if langs else "EN"
+
+        def _sync_generate() -> List[str]:
+            report_json = generate_sgnipt_report_json(
+                order_id=job.order_id,
+                sample_name=job.sample_name or job.order_id,
+                result_json_path=result_json_path,
+                confirmed_variants=confirmed_variants or [],
+                output_dir=output_dir,
+                reviewer_info=reviewer_info or {},
+                patient_info=patient_info or {},
+                report_language=primary_lang,
+                gene_knowledge_db=db_path,
+                gemini_api_key=gemini_key,
+                gemini_model=gemini_model,
+            )
+            pdf_files = generate_sgnipt_report_pdf(
+                report_json_path=report_json,
+                output_dir=output_dir,
+                languages=langs,
+            )
+            result = [report_json] + pdf_files
+            logger.info(
+                "[sgnipt] generate_report complete for %s: %d file(s)", job.order_id, len(result)
+            )
+            return result
+
+        return await asyncio.to_thread(_sync_generate)
+
     def get_progress_stages(self) -> Dict[str, int]:
         return {
             "FASTQ": 15,

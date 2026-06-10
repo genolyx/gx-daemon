@@ -1382,6 +1382,71 @@ async def preview_report_html(order_id: str, request: ReportGenerateRequest):
     if not plugin or not hasattr(plugin, "generate_report"):
         raise HTTPException(status_code=400, detail="Service does not support report generation")
 
+    # ── sgNIPT preview ──────────────────────────────────────────────────────
+    if job.service_code == "sgnipt":
+        from .services.sgnipt_report import (
+            generate_sgnipt_report_json,
+            render_sgnipt_preview_html,
+        )
+
+        output_dir = job.output_dir or ""
+        result_json_path = os.path.join(output_dir, "result.json")
+        if not os.path.isfile(result_json_path):
+            oid = (job.order_id or "").strip()
+            candidate = os.path.join(output_dir, f"{oid}.json")
+            if os.path.isfile(candidate):
+                result_json_path = candidate
+            else:
+                raise HTTPException(status_code=404, detail="result.json not found for this order")
+
+        pi = dict(request.patient_info) if request.patient_info else {}
+        if not (pi.get("name") or "").strip():
+            pi["name"] = (job.sample_name or "").strip()
+
+        p_raw = job.params or {}
+        langs_raw = p_raw.get("report_language") or p_raw.get("languages") or ["EN"]
+        langs = [langs_raw] if isinstance(langs_raw, str) else list(langs_raw)
+
+        def _render_sgnipt_preview():
+            db_path = (getattr(settings, "gene_knowledge_db", None) or "").strip() or None
+            gemini_key = (getattr(settings, "gemini_api_key", None) or "").strip() or None
+            gemini_model = getattr(settings, "gene_knowledge_gemini_model", "gemini-2.5-flash")
+
+            rjson = generate_sgnipt_report_json(
+                order_id=job.order_id,
+                sample_name=job.sample_name or job.order_id,
+                result_json_path=result_json_path,
+                confirmed_variants=request.confirmed_variants or [],
+                output_dir=output_dir,
+                reviewer_info=request.reviewer_info or {},
+                patient_info=pi,
+                report_language=langs[0].upper() if langs else "EN",
+                gene_knowledge_db=db_path,
+                gemini_api_key=gemini_key,
+                gemini_model=gemini_model,
+            )
+            import json as _json
+            with open(rjson, encoding="utf-8") as f:
+                report_data = _json.load(f)
+
+            result = {}
+            for lang in langs:
+                html = render_sgnipt_preview_html(report_data, language=lang)
+                result[lang.upper()] = {
+                    "html": html,
+                    "template": f"sgnipt_{lang.upper()}.html",
+                }
+            return result
+
+        try:
+            rendered = await asyncio.to_thread(_render_sgnipt_preview)
+        except Exception as e:
+            logger.error("sgNIPT report preview failed for %s: %s", order_id, e, exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Preview rendering failed: {e}")
+
+        return JSONResponse({"status": "ok", "order_id": order_id, "languages": rendered})
+    # ── end sgNIPT preview ───────────────────────────────────────────────────
+
     if job.service_code not in _CARRIER_LIKE:
         raise HTTPException(status_code=400, detail="Preview is only supported for carrier-like services")
 
@@ -1514,8 +1579,8 @@ async def generate_report_from_html(order_id: str, request: Request):
     if not job:
         raise HTTPException(status_code=404, detail=f"Order not found: {order_id}")
 
-    if job.service_code not in _CARRIER_LIKE:
-        raise HTTPException(status_code=400, detail="Only carrier-like services supported")
+    if job.service_code not in _CARRIER_LIKE and job.service_code != "sgnipt":
+        raise HTTPException(status_code=400, detail="Only carrier-like and sgnipt services supported")
 
     body = await request.json()
     languages_html: dict = body.get("languages") or {}
