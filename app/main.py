@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 from typing import Dict, Any, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
-from fastapi import FastAPI, HTTPException, Query, Body, Request, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Query, Body, Request, BackgroundTasks, File, Form, UploadFile
 from fastapi.responses import JSONResponse, FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -2662,6 +2662,48 @@ async def get_dashboard_bucket(
             for j in jobs
         ],
     }
+
+
+# ══════════════════════════════════════════════════════════════
+# PORTAL VARIANT SETS (Review tagging)
+# ══════════════════════════════════════════════════════════════
+
+@app.get("/api/portal/variant-sets")
+def portal_variant_sets_list():
+    """List uploaded variant sets and lookup map for Review tagging."""
+    from .variant_sets import get_catalog_for_portal
+    return get_catalog_for_portal()
+
+
+@app.post("/api/portal/variant-sets")
+async def portal_variant_sets_upload(
+    tag_name: str = Form(..., description="Display tag (e.g. Hotspot)"),
+    file: UploadFile = File(..., description="TSV: chrom, pos, ref, alt (+ optional gene, label)"),
+):
+    from .variant_sets import parse_variant_sets_tsv, upsert_variant_set, get_catalog_for_portal
+    tag = (tag_name or "").strip()
+    if not tag:
+        raise HTTPException(status_code=400, detail="tag_name is required")
+    try:
+        raw = await file.read()
+        text = raw.decode("utf-8-sig", errors="replace")
+        entries = parse_variant_sets_tsv(text)
+        meta = upsert_variant_set(tag, entries)
+        return {"status": "ok", **meta, **get_catalog_for_portal()}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except OSError as e:
+        raise HTTPException(status_code=503, detail=f"Could not save variant set: {e}") from e
+
+
+@app.delete("/api/portal/variant-sets/{set_id}")
+def portal_variant_sets_delete(set_id: int):
+    from .variant_sets import delete_variant_set, get_catalog_for_portal
+    if set_id < 1:
+        raise HTTPException(status_code=400, detail="invalid set_id")
+    if not delete_variant_set(set_id):
+        raise HTTPException(status_code=404, detail="Variant set not found")
+    return {"status": "ok", "deleted_id": set_id, **get_catalog_for_portal()}
 
 
 # ══════════════════════════════════════════════════════════════
