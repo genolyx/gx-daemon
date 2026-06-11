@@ -412,11 +412,11 @@
     <thead>
         <tr>
             <th width="12%">GENE</th>
-            <th width="18%">VARIANT</th>
+            <th width="20%">VARIANT</th>
             <th width="14%">GENOMIC</th>
-            <th width="12%">ORIGIN</th>
+            <th width="9%">VAF</th>
             <th width="14%">FETAL GENOTYPE</th>
-            <th width="15%">CLASSIFICATION</th>
+            <th width="16%">CLASSIFICATION</th>
             <th width="15%">DISEASE</th>
         </tr>
     </thead>
@@ -431,15 +431,10 @@
                     {% if not v.hgvsc and not v.hgvsp %}{{ v.chrom }}:{{ v.pos }} {{ v.ref }}>{{ v.alt }}{% endif %}
                 </td>
                 <td style="font-size:7.5pt;color:#64748b;">{{ v.chrom }}:{{ v.pos }}</td>
-                <td>
-                    {% set orig = (v.origin or '') | lower %}
-                    {% if 'fetal' in orig %}
-                        <span class="badge-fetal">Fetal</span>
-                    {% elif 'maternal' in orig %}
-                        <span class="badge-maternal">Maternal</span>
-                    {% else %}
-                        <span class="badge-ambiguous">{{ v.origin or '—' }}</span>
-                    {% endif %}
+                <td style="font-size:7.5pt;text-align:center;">
+                    {% if v.vaf is not none and v.vaf != '' %}
+                        {{ (v.vaf * 100) | round(1) }}%
+                    {% else %}—{% endif %}
                 </td>
                 <td style="font-size:7.5pt;">{{ v.fetal_genotype or '—' }}</td>
                 <td>
@@ -503,22 +498,14 @@
                     <strong>{{ v.chrom }}:{{ v.pos }} {{ v.ref }}>{{ v.alt }}</strong>
                 {% endif %}
                 &nbsp;|&nbsp; Classification: <strong>{{ v.classification or '—' }}</strong>
-                &nbsp;|&nbsp; VAF: {{ v.vaf if v.vaf is defined else '—' }}
+                &nbsp;|&nbsp; VAF: {% if v.vaf is not none and v.vaf != '' %}{{ (v.vaf * 100) | round(1) }}%{% else %}—{% endif %}
                 {% if v.depth %} &nbsp;|&nbsp; Depth: {{ v.depth }}×{% endif %}
             </p>
         </div>
 
         <div style="margin-bottom:10px;">
-            <div class="sub-label">Fetal Origin Assessment</div>
+            <div class="sub-label">Fetal Genotype</div>
             <p class="detail-text">
-                {% set orig = (v.origin or '') | lower %}
-                {% if 'fetal' in orig %}
-                    This variant is classified as <strong>fetal-specific</strong> — the allele fraction pattern is consistent with the variant being present in the fetal genome and absent in the maternal background.
-                {% elif 'maternal' in orig %}
-                    This variant is of <strong>maternal origin</strong> — the variant is present in maternal DNA. The fetus is expected to carry at least one copy inherited from the mother (fetal genotype: {{ v.fetal_genotype or 'at_least_het' }}).
-                {% else %}
-                    The variant origin could not be unambiguously determined (classified as <strong>ambiguous</strong>). Manual review of allele fractions is recommended.
-                {% endif %}
                 Fetal genotype: <strong>{{ v.fetal_genotype or '—' }}</strong>.
                 {% if v.confidence %} Confidence: <strong>{{ v.confidence }}</strong>.{% endif %}
             </p>

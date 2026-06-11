@@ -753,6 +753,37 @@ def _load_result_dict_for_gene_knowledge(order_id: str, job) -> Optional[Dict[st
     return None
 
 
+def _extract_order_genes(result_data: Dict[str, Any]) -> set:
+    """
+    유전자 심볼 집합을 result.json에서 추출.
+    carrier screening: result_data["variants"][].gene
+    sgNIPT: clinical_findings[].gene (없으면 target_name 앞부분) + all_target_variants[]
+    """
+    genes: set = set()
+
+    def _add_gene(v: Dict[str, Any]) -> None:
+        g = (v.get("gene") or "").strip().upper()
+        if g:
+            genes.add(g)
+            return
+        # sgNIPT: target_name = "GENENAME_ENST..." 형태에서 추출
+        tn = (v.get("target_name") or "").strip()
+        if tn:
+            part = tn.split("|")[0].split("_")[0].upper()
+            if part:
+                genes.add(part)
+
+    for v in (result_data.get("variants") or []):
+        _add_gene(v)
+    for v in (result_data.get("clinical_findings") or []):
+        _add_gene(v)
+    for v in (result_data.get("all_target_variants") or []):
+        _add_gene(v)
+
+    genes.discard("")
+    return genes
+
+
 def _compute_order_gene_knowledge(
     order_id: str, job,
     enrich: bool, gene_filter: Optional[str] = None,
@@ -774,8 +805,7 @@ def _compute_order_gene_knowledge(
         msg = "result.json not available for this order"
         return {"gene_knowledge_db_configured": True, "genes": {}, "variants": {}, "message": msg, "error": msg}
 
-    variants = result_data.get("variants") or []
-    order_genes = {(v.get("gene") or "").strip().upper() for v in variants if (v.get("gene") or "").strip()}
+    order_genes = _extract_order_genes(result_data)
     genes = sorted(order_genes)
     gf = (gene_filter or "").strip().upper() or None
     if gf:
@@ -798,8 +828,17 @@ def _compute_order_gene_knowledge(
 
     gene_set = set(genes)
     variant_keys_set: set = set()
-    for v in variants:
+    all_variants = (
+        (result_data.get("variants") or [])
+        + (result_data.get("clinical_findings") or [])
+        + (result_data.get("all_target_variants") or [])
+    )
+    for v in all_variants:
         g = (v.get("gene") or "").strip().upper()
+        if not g:
+            tn = (v.get("target_name") or "").strip()
+            if tn:
+                g = tn.split("|")[0].split("_")[0].upper()
         if g and g in gene_set:
             variant_keys_set.add(make_variant_key(g, str(v.get("hgvsc") or ""), str(v.get("hgvsp") or "")))
     variants_out = load_variant_knowledge_for_keys(db_path, list(variant_keys_set))
@@ -844,8 +883,7 @@ def _put_order_gene_knowledge(order_id: str, job, body, genes_csv: Optional[str]
     result_data = _load_result_dict_for_gene_knowledge(order_id, job)
     if not isinstance(result_data, dict):
         raise HTTPException(status_code=400, detail="result.json not available for this order")
-    variants = result_data.get("variants") or []
-    order_genes = {(v.get("gene") or "").strip().upper() for v in variants if (v.get("gene") or "").strip()}
+    order_genes = _extract_order_genes(result_data)
     if gene not in order_genes:
         raise HTTPException(status_code=400, detail=f"Gene {gene} is not among this order's variants")
     if genes_csv is not None:

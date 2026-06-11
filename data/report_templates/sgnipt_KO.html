@@ -214,11 +214,11 @@
     <thead>
         <tr>
             <th width="12%">유전자</th>
-            <th width="18%">변이</th>
+            <th width="20%">변이</th>
             <th width="14%">유전체 위치</th>
-            <th width="12%">기원</th>
+            <th width="9%">VAF</th>
             <th width="14%">태아 유전형</th>
-            <th width="15%">분류</th>
+            <th width="16%">분류</th>
             <th width="15%">질환</th>
         </tr>
     </thead>
@@ -233,11 +233,10 @@
                     {% if not v.hgvsc and not v.hgvsp %}{{ v.chrom }}:{{ v.pos }} {{ v.ref }}>{{ v.alt }}{% endif %}
                 </td>
                 <td style="font-size:7.5pt;color:#64748b;">{{ v.chrom }}:{{ v.pos }}</td>
-                <td>
-                    {% set orig = (v.origin or '') | lower %}
-                    {% if 'fetal' in orig %}<span class="badge-fetal">태아</span>
-                    {% elif 'maternal' in orig %}<span class="badge-maternal">모체</span>
-                    {% else %}<span class="badge-ambiguous">{{ v.origin or '—' }}</span>{% endif %}
+                <td style="font-size:7.5pt;text-align:center;">
+                    {% if v.vaf is not none and v.vaf != '' %}
+                        {{ (v.vaf * 100) | round(1) }}%
+                    {% else %}—{% endif %}
                 </td>
                 <td style="font-size:7.5pt;">{{ v.fetal_genotype or '—' }}</td>
                 <td>
@@ -293,22 +292,14 @@
                     <strong>{{ v.chrom }}:{{ v.pos }} {{ v.ref }}>{{ v.alt }}</strong>
                 {% endif %}
                 &nbsp;|&nbsp; 분류: <strong>{{ v.classification or '—' }}</strong>
-                &nbsp;|&nbsp; VAF: {{ v.vaf if v.vaf is defined else '—' }}
+                &nbsp;|&nbsp; VAF: {% if v.vaf is not none and v.vaf != '' %}{{ (v.vaf * 100) | round(1) }}%{% else %}—{% endif %}
                 {% if v.depth %} &nbsp;|&nbsp; 깊이: {{ v.depth }}×{% endif %}
             </p>
         </div>
 
         <div style="margin-bottom:10px;">
-            <div class="sub-label">태아 기원 판정</div>
+            <div class="sub-label">태아 유전형</div>
             <p class="detail-text">
-                {% set orig = (v.origin or '') | lower %}
-                {% if 'fetal' in orig %}
-                    이 변이는 <strong>태아 특이적</strong>으로 분류됩니다. 대립 유전자 분율 패턴이 모체 배경에는 없고 태아 게놈에만 존재함을 시사합니다.
-                {% elif 'maternal' in orig %}
-                    이 변이는 <strong>모체 유래</strong>입니다. 변이가 모체 DNA에 존재하며, 태아는 모체로부터 최소 1개의 대립 유전자를 물려받은 것으로 예상됩니다 (태아 유전형: {{ v.fetal_genotype or 'at_least_het' }}).
-                {% else %}
-                    변이 기원을 명확히 판별할 수 없었습니다 (<strong>모호함</strong>). 대립 유전자 분율의 수동 검토가 권장됩니다.
-                {% endif %}
                 태아 유전형: <strong>{{ v.fetal_genotype or '—' }}</strong>.
                 {% if v.confidence %} 신뢰도: <strong>{{ v.confidence }}</strong>.{% endif %}
             </p>
