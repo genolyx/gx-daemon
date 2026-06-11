@@ -1449,6 +1449,10 @@ async def preview_report_html(order_id: str, request: ReportGenerateRequest):
             db_path = (getattr(settings, "gene_knowledge_db", None) or "").strip() or None
             gemini_key = (getattr(settings, "gemini_api_key", None) or "").strip() or None
             gemini_model = getattr(settings, "gene_knowledge_gemini_model", "gemini-2.5-flash")
+            _clinvar_vcf = (getattr(settings, "clinvar_vcf", None) or "").strip() or None
+            _gnomad_dir = (getattr(settings, "gnomad_dir", None) or "").strip() or None
+            _gnomad_genomes_glob = getattr(settings, "gnomad_genomes_glob", "gnomad.genomes.v*.sites*.bgz")
+            _gnomad_exomes_glob = getattr(settings, "gnomad_exomes_glob", "gnomad.exomes.v*.sites*.bgz")
 
             rjson = generate_sgnipt_report_json(
                 order_id=job.order_id,
@@ -1462,6 +1466,10 @@ async def preview_report_html(order_id: str, request: ReportGenerateRequest):
                 gene_knowledge_db=db_path,
                 gemini_api_key=gemini_key,
                 gemini_model=gemini_model,
+                clinvar_vcf=_clinvar_vcf,
+                gnomad_dir=_gnomad_dir,
+                gnomad_genomes_glob=_gnomad_genomes_glob,
+                gnomad_exomes_glob=_gnomad_exomes_glob,
             )
             import json as _json
             with open(rjson, encoding="utf-8") as f:

@@ -141,10 +141,12 @@ def _enrich_confirmed_variant(
     db_path: Optional[str],
     gemini_key: Optional[str],
     model: str,
+    clinvar_annotator: Optional[Any] = None,
+    gnomad_annotator: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
-    Merge gene knowledge (gene_description, disease_association, inheritance) into
-    a confirmed variant dict. Falls back gracefully if DB/Gemini not configured.
+    Merge gene knowledge + ClinVar annotation + ACMG rule-based classification
+    into a confirmed variant dict. Falls back gracefully when resources absent.
     """
     v = dict(cv)
 
@@ -182,6 +184,70 @@ def _enrich_confirmed_variant(
             if cf.get("chrom") == chrom and cf.get("pos") == pos:
                 v["disease"] = cf.get("disease") or ""
                 break
+
+    # ── ClinVar annotation ─────────────────────────────────────────────────
+    chrom = str(v.get("chrom") or "")
+    pos_val = v.get("pos")
+    ref = str(v.get("ref") or "")
+    alt = str(v.get("alt") or "")
+
+    clinvar_result: Optional[Dict[str, Any]] = None
+    if clinvar_annotator and chrom and pos_val is not None and ref and alt:
+        try:
+            clinvar_result = clinvar_annotator.lookup(chrom, int(pos_val), ref, alt)
+        except Exception as e:
+            logger.debug("[sgnipt_report] ClinVar lookup failed %s:%s: %s", chrom, pos_val, e)
+
+    if clinvar_result:
+        v["clinvar_sig"] = clinvar_result.get("clnsig", "")
+        v["clinvar_sig_primary"] = clinvar_result.get("clnsig_primary", "")
+        v["clinvar_stars"] = int(clinvar_result.get("stars") or 0)
+        v["clinvar_dn"] = clinvar_result.get("clndn", "")
+        v["clinvar_variation_id"] = clinvar_result.get("variation_id", "")
+        v["clinvar_revstat"] = clinvar_result.get("revstat", "")
+    else:
+        v.setdefault("clinvar_sig", "")
+        v.setdefault("clinvar_sig_primary", "")
+        v.setdefault("clinvar_stars", 0)
+        v.setdefault("clinvar_dn", "")
+
+    # ── gnomAD annotation ──────────────────────────────────────────────────
+    gnomad_af: Optional[float] = None
+    if gnomad_annotator and chrom and pos_val is not None and ref and alt:
+        try:
+            gn = gnomad_annotator.lookup(chrom, int(pos_val), ref, alt)
+            gnomad_af = gn.get("af")
+        except Exception as e:
+            logger.debug("[sgnipt_report] gnomAD lookup failed %s:%s: %s", chrom, pos_val, e)
+
+    if gnomad_af is not None:
+        v["gnomad_af"] = gnomad_af
+    else:
+        v.setdefault("gnomad_af", None)
+
+    # ── ACMG rule-based classification ────────────────────────────────────
+    if not v.get("acmg_classification"):
+        try:
+            from .carrier_screening.acmg import classify_acmg_lite
+            acmg_input = {
+                "chrom": chrom,
+                "pos": pos_val,
+                "ref": ref,
+                "alt": alt,
+                "gene": gene,
+                "effect": v.get("effect") or "",
+                "clinvar_sig_primary": v.get("clinvar_sig_primary") or "",
+                "clinvar_stars": v.get("clinvar_stars") or 0,
+                "gnomad_af": gnomad_af,
+            }
+            acmg_result = classify_acmg_lite(acmg_input)
+            v["acmg_classification"] = acmg_result.get("classification", "VUS")
+            v["acmg_criteria"] = acmg_result.get("criteria_met", [])
+            v["acmg_reasoning"] = acmg_result.get("reasoning", "")
+            v["acmg_confidence"] = acmg_result.get("confidence", "low")
+        except Exception as e:
+            logger.debug("[sgnipt_report] ACMG classification failed: %s", e)
+            v.setdefault("acmg_classification", "")
 
     return v
 
@@ -221,9 +287,15 @@ def generate_sgnipt_report_json(
     gene_knowledge_db: Optional[str] = None,
     gemini_api_key: Optional[str] = None,
     gemini_model: str = "gemini-2.5-flash",
+    clinvar_vcf: Optional[str] = None,
+    gnomad_dir: Optional[str] = None,
+    gnomad_genomes_glob: str = "gnomad.genomes.v*.sites*.bgz",
+    gnomad_exomes_glob: str = "gnomad.exomes.v*.sites*.bgz",
 ) -> str:
     """
     Build report.json from result.json + reviewer-confirmed variants.
+    Annotates each confirmed variant with ClinVar + gnomAD + ACMG rule-based
+    classification when annotation resources are configured.
     Returns the path to the written report.json.
     """
     os.makedirs(output_dir, exist_ok=True)
@@ -234,21 +306,47 @@ def generate_sgnipt_report_json(
     except Exception as e:
         raise RuntimeError(f"[sgnipt_report] Cannot read result.json at {result_json_path}: {e}") from e
 
+    # Build annotators (lazy — skip if paths not configured)
+    clinvar_annotator: Optional[Any] = None
+    gnomad_annotator: Optional[Any] = None
+    try:
+        from .carrier_screening.annotator import ClinVarAnnotator, GnomADAnnotator
+        if clinvar_vcf and os.path.isfile(clinvar_vcf):
+            clinvar_annotator = ClinVarAnnotator(clinvar_vcf)
+            logger.info("[sgnipt_report] ClinVar annotator ready: %s", clinvar_vcf)
+        else:
+            if clinvar_vcf:
+                logger.warning("[sgnipt_report] ClinVar VCF not found, skipping ClinVar: %s", clinvar_vcf)
+            else:
+                logger.info("[sgnipt_report] ClinVar VCF not configured, skipping ClinVar annotation")
+        if gnomad_dir and os.path.isdir(gnomad_dir):
+            gnomad_annotator = GnomADAnnotator(gnomad_dir, gnomad_genomes_glob, gnomad_exomes_glob)
+            logger.info("[sgnipt_report] gnomAD annotator ready: %s", gnomad_dir)
+        else:
+            if gnomad_dir:
+                logger.warning("[sgnipt_report] gnomAD dir not found, skipping gnomAD: %s", gnomad_dir)
+    except Exception as e:
+        logger.warning("[sgnipt_report] Failed to initialise annotators: %s", e)
+
     pi = patient_info or {}
     ri = reviewer_info or {}
     now_str = _fmt_date()
 
-    # Enrich confirmed variants
+    # Enrich confirmed variants (gene knowledge + ClinVar + ACMG)
     enriched_variants = [
-        _enrich_confirmed_variant(cv, result_data, gene_knowledge_db, gemini_api_key, gemini_model)
+        _enrich_confirmed_variant(
+            cv, result_data, gene_knowledge_db, gemini_api_key, gemini_model,
+            clinvar_annotator=clinvar_annotator,
+            gnomad_annotator=gnomad_annotator,
+        )
         for cv in (confirmed_variants or [])
     ]
 
     overall_status = result_data.get("sgnipt_status") or "NO_CALL"
-    # If reviewer confirmed any pathogenic variant, upgrade to POSITIVE
+    # If any confirmed variant is classified Pathogenic/Likely Pathogenic → POSITIVE
     for cv in enriched_variants:
-        cls = (cv.get("classification") or "").lower()
-        if "pathogenic" in cls:
+        acmg_cls = (cv.get("acmg_classification") or cv.get("classification") or "").lower()
+        if "pathogenic" in acmg_cls:
             overall_status = "POSITIVE"
             break
 

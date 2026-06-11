@@ -415,14 +415,16 @@
             <th width="20%">VARIANT</th>
             <th width="14%">GENOMIC</th>
             <th width="9%">VAF</th>
-            <th width="14%">FETAL GENOTYPE</th>
-            <th width="16%">CLASSIFICATION</th>
-            <th width="15%">DISEASE</th>
+            <th width="12%">FETAL GENOTYPE</th>
+            <th width="16%">ACMG CLASS.</th>
+            <th width="9%">CLINVAR</th>
+            <th width="8%">DISEASE</th>
         </tr>
     </thead>
     <tbody>
         {% if data.confirmed_variants and data.confirmed_variants | length > 0 %}
             {% for v in data.confirmed_variants %}
+            {% set cls = (v.acmg_classification or v.classification or '') | lower %}
             <tr>
                 <td><strong>{{ v.gene or '—' }}</strong></td>
                 <td style="font-family:monospace;font-size:7.5pt;">
@@ -438,23 +440,40 @@
                 </td>
                 <td style="font-size:7.5pt;">{{ v.fetal_genotype or '—' }}</td>
                 <td>
-                    {% set cls = (v.classification or '') | lower %}
                     {% if 'pathogenic' in cls and 'likely' not in cls %}
-                        <span style="color:#be123c;font-weight:600;">{{ v.classification }}</span>
+                        <span style="color:#be123c;font-weight:600;">{{ v.acmg_classification or v.classification }}</span>
                     {% elif 'likely pathogenic' in cls %}
-                        <span style="color:#c2410c;font-weight:600;">{{ v.classification }}</span>
+                        <span style="color:#c2410c;font-weight:600;">{{ v.acmg_classification or v.classification }}</span>
                     {% elif 'vus' in cls or 'uncertain' in cls %}
-                        <span style="color:#b45309;font-weight:500;">{{ v.classification }}</span>
-                    {% else %}
-                        <span>{{ v.classification or '—' }}</span>
+                        <span style="color:#b45309;font-weight:500;">{{ v.acmg_classification or v.classification }}</span>
+                    {% elif v.acmg_classification or v.classification %}
+                        <span>{{ v.acmg_classification or v.classification }}</span>
+                    {% else %}—{% endif %}
+                    {% if v.acmg_criteria %}
+                        <div style="font-size:6.5pt;color:#64748b;margin-top:2px;">{{ v.acmg_criteria | join(', ') }}</div>
                     {% endif %}
+                </td>
+                <td style="font-size:7pt;">
+                    {% if v.clinvar_sig_primary %}
+                        {% set cv = v.clinvar_sig_primary | lower %}
+                        {% if 'pathogenic' in cv and 'likely' not in cv %}
+                            <span style="color:#be123c;font-weight:600;">{{ v.clinvar_sig_primary }}</span>
+                        {% elif 'likely pathogenic' in cv %}
+                            <span style="color:#c2410c;font-weight:600;">{{ v.clinvar_sig_primary }}</span>
+                        {% else %}
+                            <span>{{ v.clinvar_sig_primary }}</span>
+                        {% endif %}
+                        {% if v.clinvar_stars and v.clinvar_stars > 0 %}
+                            <div style="font-size:6pt;color:#64748b;">{{ '★' * v.clinvar_stars }}</div>
+                        {% endif %}
+                    {% else %}—{% endif %}
                 </td>
                 <td style="font-size:7.5pt;">{{ v.disease or v.disorder or '—' }}</td>
             </tr>
             {% endfor %}
         {% else %}
             <tr>
-                <td colspan="7" style="text-align:center;padding:30px;color:#64748b;font-style:italic;">
+                <td colspan="8" style="text-align:center;padding:30px;color:#64748b;font-style:italic;">
                     No pathogenic or likely pathogenic variants identified in the target gene(s) evaluated.
                 </td>
             </tr>
@@ -497,11 +516,30 @@
                 {% else %}
                     <strong>{{ v.chrom }}:{{ v.pos }} {{ v.ref }}>{{ v.alt }}</strong>
                 {% endif %}
-                &nbsp;|&nbsp; Classification: <strong>{{ v.classification or '—' }}</strong>
+                &nbsp;|&nbsp; ACMG: <strong>{{ v.acmg_classification or v.classification or '—' }}</strong>
                 &nbsp;|&nbsp; VAF: {% if v.vaf is not none and v.vaf != '' %}{{ (v.vaf * 100) | round(1) }}%{% else %}—{% endif %}
                 {% if v.depth %} &nbsp;|&nbsp; Depth: {{ v.depth }}×{% endif %}
             </p>
         </div>
+
+        {% if v.clinvar_sig_primary or v.acmg_criteria %}
+        <div style="margin-bottom:10px;">
+            <div class="sub-label">Classification Evidence</div>
+            <p class="detail-text">
+                {% if v.clinvar_sig_primary %}
+                    ClinVar: <strong>{{ v.clinvar_sig_primary }}</strong>
+                    {% if v.clinvar_stars %} ({{ v.clinvar_stars }}★){% endif %}
+                    {% if v.clinvar_dn %} — {{ v.clinvar_dn }}{% endif %}.
+                {% endif %}
+                {% if v.acmg_criteria %}
+                    ACMG criteria: <strong>{{ v.acmg_criteria | join(', ') }}</strong>.
+                {% endif %}
+                {% if v.acmg_reasoning %}
+                    {{ v.acmg_reasoning }}
+                {% endif %}
+            </p>
+        </div>
+        {% endif %}
 
         <div style="margin-bottom:10px;">
             <div class="sub-label">Fetal Genotype</div>

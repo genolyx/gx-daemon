@@ -831,6 +831,10 @@ class SgNIPTPlugin(ServicePlugin):
         db_path = (getattr(settings, "gene_knowledge_db", None) or "").strip() or None
         gemini_key = (getattr(settings, "gemini_api_key", None) or "").strip() or None
         gemini_model = getattr(settings, "gene_knowledge_gemini_model", "gemini-2.5-flash")
+        _clinvar_vcf = (getattr(settings, "clinvar_vcf", None) or "").strip() or None
+        _gnomad_dir = (getattr(settings, "gnomad_dir", None) or "").strip() or None
+        _gnomad_genomes_glob = getattr(settings, "gnomad_genomes_glob", "gnomad.genomes.v*.sites*.bgz")
+        _gnomad_exomes_glob = getattr(settings, "gnomad_exomes_glob", "gnomad.exomes.v*.sites*.bgz")
 
         primary_lang = langs[0].upper() if langs else "EN"
 
@@ -847,6 +851,10 @@ class SgNIPTPlugin(ServicePlugin):
                 gene_knowledge_db=db_path,
                 gemini_api_key=gemini_key,
                 gemini_model=gemini_model,
+                clinvar_vcf=_clinvar_vcf,
+                gnomad_dir=_gnomad_dir,
+                gnomad_genomes_glob=_gnomad_genomes_glob,
+                gnomad_exomes_glob=_gnomad_exomes_glob,
             )
             pdf_files = generate_sgnipt_report_pdf(
                 report_json_path=report_json,
