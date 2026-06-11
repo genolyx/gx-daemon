@@ -14,6 +14,7 @@ import csv
 import os
 import glob
 import json
+import asyncio
 import logging
 import re
 import shlex
@@ -685,6 +686,185 @@ class SgNIPTPlugin(ServicePlugin):
             "variant_analysis_summary": sample0.get("variant_analysis"),
         }
 
+    def _annotate_clinical_findings(self, findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        ClinVar + gnomAD + ACMG rule-based classification을 clinical_findings에 적용.
+        효율성을 위해 VAF > 0 인 변이만 ClinVar/gnomAD 조회하고,
+        나머지는 ACMG PM2 (absent from DB) 기준만 적용하여 VUS 처리.
+        """
+        clinvar_vcf = (getattr(settings, "clinvar_vcf", None) or "").strip() or None
+        gnomad_dir = (getattr(settings, "gnomad_dir", None) or "").strip() or None
+        gnomad_genomes_glob = getattr(settings, "gnomad_genomes_glob", "gnomad.genomes.v*.sites*.bgz")
+        gnomad_exomes_glob = getattr(settings, "gnomad_exomes_glob", "gnomad.exomes.v*.sites*.bgz")
+
+        try:
+            from .carrier_screening.annotator import ClinVarAnnotator, GnomADAnnotator
+            from .carrier_screening.acmg import classify_acmg_lite
+        except Exception as e:
+            logger.warning("[sgnipt] annotation modules not available: %s", e)
+            return findings
+
+        clinvar_ann = None
+        gnomad_ann = None
+
+        if clinvar_vcf and os.path.isfile(clinvar_vcf):
+            try:
+                clinvar_ann = ClinVarAnnotator(clinvar_vcf)
+                logger.info("[sgnipt] ClinVar annotator ready for process_results: %s", clinvar_vcf)
+            except Exception as e:
+                logger.warning("[sgnipt] ClinVar init failed: %s", e)
+        else:
+            logger.info("[sgnipt] CLINVAR_VCF not configured — skipping ClinVar annotation (set CLINVAR_VCF in .env to enable)")
+
+        if gnomad_dir and os.path.isdir(gnomad_dir):
+            try:
+                gnomad_ann = GnomADAnnotator(gnomad_dir, gnomad_genomes_glob, gnomad_exomes_glob)
+            except Exception as e:
+                logger.warning("[sgnipt] gnomAD init failed: %s", e)
+
+        # ClinVar pysam 연결을 재사용하기 위해 VariantFile을 한 번 열어두고 직접 활용
+        # ClinVarAnnotator.lookup()은 매번 열고 닫으므로, 여기서 직접 단일 연결로 처리
+        _pysam_cv = None
+        _cv_has_chr = None
+        if clinvar_ann:
+            try:
+                import pysam as _pysam
+                _pysam_cv = _pysam.VariantFile(clinvar_vcf)
+                contigs = list(_pysam_cv.header.contigs)
+                _cv_has_chr = any(str(c).startswith("chr") for c in contigs) if contigs else True
+            except Exception as e:
+                logger.warning("[sgnipt] pysam open failed: %s", e)
+                _pysam_cv = None
+
+        def _cv_lookup(chrom: str, pos: int, ref: str, alt: str):
+            if not _pysam_cv:
+                return None
+            try:
+                qc = ("chr" + chrom.lstrip("chr")) if _cv_has_chr else chrom.lstrip("chr")
+                for rec in _pysam_cv.fetch(qc, pos - 1, pos):
+                    if rec.pos != pos or rec.ref != ref:
+                        continue
+                    if not rec.alts or alt not in rec.alts:
+                        continue
+                    return clinvar_ann.lookup(chrom, pos, ref, alt)  # use full parsing
+            except Exception:
+                pass
+            return None
+
+        annotated = []
+        annotated_count = 0
+
+        for v in findings:
+            v = dict(v)
+            chrom = str(v.get("chrom") or "")
+            pos_val = v.get("pos")
+            ref = str(v.get("ref") or "")
+            alt = str(v.get("alt") or "")
+            vaf = v.get("vaf") or 0
+
+            # VAF == 0 variants (reference positions without mutation): skip expensive lookups,
+            # but still mark as VUS via PM2 rule to ensure acmg_classification is set
+            if not (chrom and pos_val is not None and ref and alt) or float(vaf) == 0:
+                if not v.get("acmg_classification"):
+                    v.setdefault("clinvar_sig", "")
+                    v.setdefault("clinvar_sig_primary", "")
+                    v.setdefault("clinvar_stars", 0)
+                    v.setdefault("clinvar_dn", "")
+                    v.setdefault("gnomad_af", None)
+                    v["acmg_classification"] = "VUS"
+                    v["acmg_criteria"] = ["PM2"]
+                    v["acmg_reasoning"] = "Not found in gnomAD"
+                    v["acmg_confidence"] = "low"
+                annotated.append(v)
+                continue
+
+            # Only do full ClinVar + gnomAD lookup for variants with VAF > 0
+            annotated_count += 1
+
+            # ClinVar — use single open connection via _cv_lookup
+            cv_result = None
+            if _pysam_cv and chrom and pos_val is not None and ref and alt:
+                try:
+                    qc = ("chr" + chrom.lstrip("chr")) if _cv_has_chr else chrom.lstrip("chr")
+                    for rec in _pysam_cv.fetch(qc, int(pos_val) - 1, int(pos_val)):
+                        if rec.pos != int(pos_val) or rec.ref != ref:
+                            continue
+                        if not rec.alts or alt not in rec.alts:
+                            continue
+                        # Use the annotator's full parsing logic
+                        cv_result = clinvar_ann.lookup(chrom, int(pos_val), ref, alt)
+                        break
+                except Exception as e:
+                    logger.debug("[sgnipt] ClinVar fetch %s:%s: %s", chrom, pos_val, e)
+            elif clinvar_ann:
+                try:
+                    cv_result = clinvar_ann.lookup(chrom, int(pos_val), ref, alt)
+                except Exception:
+                    pass
+
+            if cv_result:
+                v["clinvar_sig"] = cv_result.get("clnsig", "")
+                v["clinvar_sig_primary"] = cv_result.get("clnsig_primary", "")
+                v["clinvar_stars"] = int(cv_result.get("stars") or 0)
+                v["clinvar_dn"] = cv_result.get("clndn", "")
+                v["clinvar_variation_id"] = cv_result.get("variation_id", "")
+                v["clinvar_revstat"] = cv_result.get("revstat", "")
+            else:
+                v.setdefault("clinvar_sig", "")
+                v.setdefault("clinvar_sig_primary", "")
+                v.setdefault("clinvar_stars", 0)
+                v.setdefault("clinvar_dn", "")
+
+            # gnomAD
+            gnomad_af = None
+            if gnomad_ann:
+                try:
+                    gn = gnomad_ann.lookup(chrom, int(pos_val), ref, alt)
+                    gnomad_af = gn.get("af")
+                except Exception:
+                    pass
+            if gnomad_af is not None:
+                v["gnomad_af"] = gnomad_af
+            else:
+                v.setdefault("gnomad_af", None)
+
+            # ACMG rule-based
+            try:
+                acmg_input = {
+                    "chrom": chrom, "pos": pos_val, "ref": ref, "alt": alt,
+                    "gene": (v.get("gene") or "").strip().upper(),
+                    "effect": v.get("effect") or "",
+                    "clinvar_sig_primary": v.get("clinvar_sig_primary") or "",
+                    "clinvar_stars": v.get("clinvar_stars") or 0,
+                    "gnomad_af": gnomad_af,
+                }
+                acmg_res = classify_acmg_lite(acmg_input)
+                v["acmg_classification"] = acmg_res.get("classification", "VUS")
+                v["acmg_criteria"] = acmg_res.get("criteria_met", [])
+                v["acmg_reasoning"] = acmg_res.get("reasoning", "")
+                v["acmg_confidence"] = acmg_res.get("confidence", "low")
+            except Exception as e:
+                logger.debug("[sgnipt] ACMG failed %s:%s: %s", chrom, pos_val, e)
+
+            annotated.append(v)
+
+        if _pysam_cv:
+            try:
+                _pysam_cv.close()
+            except Exception:
+                pass
+
+        pathogenic_count = sum(
+            1 for v in annotated
+            if "pathogenic" in (v.get("acmg_classification") or "").lower()
+        )
+        logger.info(
+            "[sgnipt] annotation complete: %d variants (%d with VAF>0 annotated), "
+            "%d pathogenic/likely-pathogenic, ClinVar=%s",
+            len(annotated), annotated_count, pathogenic_count, "yes" if clinvar_ann else "no",
+        )
+        return annotated
+
     async def process_results(self, job: Job) -> bool:
         src = self._order_result_json(job)
         dst = os.path.join(job.output_dir, "result.json")
@@ -806,8 +986,6 @@ class SgNIPTPlugin(ServicePlugin):
         3. Render WeasyPrint PDF(s) per language (generate_sgnipt_report_pdf).
         4. Return list of generated file paths (report.json + PDFs).
         """
-        import asyncio
-
         from .sgnipt_report import (
             generate_sgnipt_report_json,
             generate_sgnipt_report_pdf,

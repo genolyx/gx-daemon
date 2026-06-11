@@ -1405,6 +1405,148 @@ async def generate_report(order_id: str, req: ReportGenerateRequest = Body(...))
     )
 
 
+@app.post("/order/{order_id}/classify-variants")
+async def classify_variants_endpoint(order_id: str, request: Request):
+    """
+    소수의 variant(chrom/pos/ref/alt)를 ClinVar + ACMG rule-based로 즉시 분류.
+    sgNIPT Review 탭에서 필터된 variant에 on-demand 분류 결과를 반환합니다.
+
+    Request body: {"variants": [{"chrom":"chr1","pos":11114297,"ref":"C","alt":"T"}, ...]}
+    Response:     {"results": [{...variant + acmg_classification + clinvar fields...}]}
+    """
+    body = await request.json()
+    variants_in: list = body.get("variants") or []
+    if not variants_in:
+        return JSONResponse({"results": []})
+
+    def _do_classify():
+        from .services.carrier_screening.annotator import ClinVarAnnotator, GnomADAnnotator
+        from .services.carrier_screening.acmg import classify_acmg_lite
+
+        clinvar_vcf = (getattr(settings, "clinvar_vcf", None) or "").strip() or None
+        gnomad_dir  = (getattr(settings, "gnomad_dir", None) or "").strip() or None
+        gnomad_genomes_glob = getattr(settings, "gnomad_genomes_glob", "gnomad.genomes.v*.sites*.bgz")
+        gnomad_exomes_glob  = getattr(settings, "gnomad_exomes_glob",  "gnomad.exomes.v*.sites*.bgz")
+
+        clinvar_ann = None
+        gnomad_ann  = None
+        _pysam_cv   = None
+        _cv_has_chr = None
+
+        if clinvar_vcf and os.path.isfile(clinvar_vcf):
+            clinvar_ann = ClinVarAnnotator(clinvar_vcf)
+            try:
+                import pysam as _pysam
+                _pysam_cv = _pysam.VariantFile(clinvar_vcf)
+                contigs = list(_pysam_cv.header.contigs)
+                _cv_has_chr = any(str(c).startswith("chr") for c in contigs) if contigs else True
+            except Exception:
+                _pysam_cv = None
+
+        if gnomad_dir and os.path.isdir(gnomad_dir):
+            try:
+                gnomad_ann = GnomADAnnotator(gnomad_dir, gnomad_genomes_glob, gnomad_exomes_glob)
+            except Exception:
+                gnomad_ann = None
+
+        results = []
+        for v in variants_in:
+            out = dict(v)
+            chrom = str(v.get("chrom") or "")
+            pos_val = v.get("pos")
+            ref = str(v.get("ref") or "")
+            alt = str(v.get("alt") or "")
+
+            if not (chrom and pos_val is not None and ref and alt):
+                out.setdefault("acmg_classification", "")
+                results.append(out)
+                continue
+
+            # ClinVar — reuse single pysam connection
+            cv_result = None
+            if clinvar_ann and _pysam_cv is not None:
+                try:
+                    qc = ("chr" + chrom.lstrip("chr")) if _cv_has_chr else chrom.lstrip("chr")
+                    for rec in _pysam_cv.fetch(qc, int(pos_val) - 1, int(pos_val)):
+                        if rec.pos != int(pos_val) or rec.ref != ref:
+                            continue
+                        if not rec.alts or alt not in rec.alts:
+                            continue
+                        cv_result = clinvar_ann.lookup(chrom, int(pos_val), ref, alt)
+                        break
+                except Exception as e:
+                    logger.debug("classify-variants ClinVar %s:%s: %s", chrom, pos_val, e)
+            elif clinvar_ann:
+                try:
+                    cv_result = clinvar_ann.lookup(chrom, int(pos_val), ref, alt)
+                except Exception:
+                    pass
+
+            if cv_result:
+                out["clinvar_sig"]         = cv_result.get("clnsig", "")
+                out["clinvar_sig_primary"] = cv_result.get("clnsig_primary", "")
+                out["clinvar_stars"]       = int(cv_result.get("stars") or 0)
+                out["clinvar_dn"]          = cv_result.get("clndn", "")
+                out["clinvar_variation_id"]= cv_result.get("variation_id", "")
+                out["clinvar_revstat"]     = cv_result.get("revstat", "")
+            else:
+                out.setdefault("clinvar_sig", "")
+                out.setdefault("clinvar_sig_primary", "")
+                out.setdefault("clinvar_stars", 0)
+                out.setdefault("clinvar_dn", "")
+
+            # gnomAD
+            gnomad_af = None
+            if gnomad_ann:
+                try:
+                    gn = gnomad_ann.lookup(chrom, int(pos_val), ref, alt)
+                    gnomad_af = gn.get("af")
+                except Exception:
+                    pass
+            if gnomad_af is not None:
+                out["gnomad_af"] = gnomad_af
+
+            # ACMG rule-based
+            try:
+                acmg_res = classify_acmg_lite({
+                    "chrom": chrom, "pos": pos_val, "ref": ref, "alt": alt,
+                    "gene": (v.get("gene") or "").strip().upper(),
+                    "effect": v.get("effect") or "",
+                    "clinvar_sig_primary": out.get("clinvar_sig_primary") or "",
+                    "clinvar_stars": out.get("clinvar_stars") or 0,
+                    "gnomad_af": gnomad_af,
+                })
+                out["acmg_classification"] = acmg_res.get("classification", "VUS")
+                out["acmg_criteria"]       = acmg_res.get("criteria_met", [])
+                out["acmg_reasoning"]      = acmg_res.get("reasoning", "")
+                out["acmg_confidence"]     = acmg_res.get("confidence", "low")
+            except Exception as e:
+                logger.debug("classify-variants ACMG %s:%s: %s", chrom, pos_val, e)
+                out.setdefault("acmg_classification", "VUS")
+
+            results.append(out)
+
+        if _pysam_cv:
+            try:
+                _pysam_cv.close()
+            except Exception:
+                pass
+
+        pathogenic_n = sum(1 for r in results if "pathogenic" in (r.get("acmg_classification") or "").lower())
+        logger.info(
+            "classify-variants: %d in → %d out, %d pathogenic, ClinVar=%s",
+            len(variants_in), len(results), pathogenic_n, "yes" if clinvar_ann else "no",
+        )
+        return results
+
+    try:
+        results = await asyncio.to_thread(_do_classify)
+        return JSONResponse({"results": results})
+    except Exception as e:
+        logger.error("classify-variants failed for %s: %s", order_id, e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/order/{order_id}/report/preview")
 async def preview_report_html(order_id: str, request: ReportGenerateRequest):
     """
