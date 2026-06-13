@@ -275,7 +275,10 @@ def _build_layout(
         show_page3 = True
 
     md_page1_rows = list(_chunk(md_page1, 2))
-    md_page3_rows = list(_chunk(md_page3, 4)) if show_page3 else []
+    if show_page3:
+        md_page3_rows = list(_chunk(md_page3, 4))
+    else:
+        md_page3_rows = []
     total_pages = 3 if show_page3 else 2
 
     return aneuploidy_rows, md_page1_rows, md_page3_rows, show_page3, total_pages

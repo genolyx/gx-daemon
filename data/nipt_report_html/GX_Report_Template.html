@@ -1,777 +1,606 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
-    <title>Genolyx NIPS - Clinical Report</title>
+    <title>Genolyx NIPS — Clinical Report</title>
     <style>
-        /* =========================================
-           EDITABLE THEME VARIABLES
-           ========================================= */
-        :root {
-            /* Slate 50-900 / Blue 600 Palette per Design System */
-            --brand-primary: #0f172a;
-            /* Slate 900 */
-            --accent-blue: #06b6d4;
-            /* Cyan-500: Matches Genolyx Logo X */
-            /* Blue 600 */
-            --border-color: #e2e8f0;
-            /* Slate 200 */
-            --bg-summary: #f8fafc;
-            /* Slate 50 */
-            --text-main: #334155;
-            /* Slate 700 */
-            --text-muted: #64748b;
-            /* Slate 500 */
-            --font-family: 'Calibri', 'Carlito', sans-serif;
+        @page {
+            size: Letter;
+            margin: 0.6in 0.5in 1in 0.5in;
+            @top-right { content: element(headerContent); }
+            @bottom-left { content: element(footerContent); }
+            @bottom-right {
+                content: "Page " counter(page) " of " counter(pages);
+                font-family: 'Helvetica Neue', Arial, sans-serif;
+                font-size: 8pt;
+                color: #94a3b8;
+            }
         }
+        @page :first { @top-right { content: none; } }
 
-
+        :root {
+            --brand-primary: #0f172a;
+            --accent-blue: #65c3c2;
+            --border-color: #e2e8f0;
+            --bg-summary: #f8fafc;
+            --text-main: #334155;
+            --text-muted: #64748b;
+        }
 
         body {
-            font-family: var(--font-family);
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            line-height: 1.3;
             color: var(--text-main);
-            line-height: 1.4;
-            padding: 20px;
-            background: #e2e8f0;
             margin: 0;
         }
 
-        .report-page {
-            width: 210mm;
-            min-height: 297mm;
-            /* Standard A4 height */
-            margin: 0 auto 40px auto;
-            /* Centered with bottom gap for screen */
-            background: white;
-            padding: 40px;
-            /* Restored to 40px */
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-            /* Elevated Card */
-            box-sizing: border-box;
-            border-radius: 8px;
-            display: flex;
-            flex-direction: column;
-            position: relative;
+        #header-content {
+            position: running(headerContent);
+            font-size: 8pt;
+            color: #64748b;
+            text-align: right;
         }
-
-        /* Header */
-        .header {
-            display: flex;
-            justify-content: space-between;
-            border-bottom: 1px solid var(--brand-primary);
-            margin-bottom: 20px;
-            padding-bottom: 10px;
-            align-items: baseline;
-        }
-
-        .logo {
-            font-size: 24px;
-            font-weight: 700;
-            color: var(--brand-primary);
-            letter-spacing: -0.5px;
-        }
-
-        /* Patient Info Grid */
-        .patient-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            column-gap: 40px;
-            row-gap: 4px;
-            /* Tighter row gap */
-            margin-bottom: 35px;
-            /* Increased from 25px */
-            font-size: 11px;
-        }
-
-        .info-row {
-            display: flex;
-            justify-content: space-between;
-            border-bottom: 1px solid var(--border-color);
-            /* Solid line to match tables */
-            padding: 4px 0;
-        }
-
-        .label {
-            font-weight: 600;
-            color: var(--text-muted);
-        }
-
-        /* Summary Box with Left Accent Bar */
-        .result-summary-box {
-            background: var(--bg-summary);
-            border-left: 5px solid var(--accent-blue);
-            padding: 16px;
-            /* Reduced from 20px */
-            margin-bottom: 20px;
-            /* Reduced from 25px */
-            border-radius: 0 8px 8px 0;
-            display: grid;
-            grid-template-columns: 1fr;
-            row-gap: 4px;
-        }
-
-        .result-main {
-            font-size: 18px;
-            /* Explicit 18px */
-            font-weight: 700;
-            margin: 0;
-            color: var(--brand-primary);
-        }
-
-        .gender-text {
-            font-size: 14px;
-            /* Updated to 14px */
-            margin: 0;
-        }
-
-        .ff-box {
-            /* Removed explicit color to match gender-text inheritance */
-            font-weight: 400;
-            /* Removed bold (was 600) */
-            font-size: 14px;
-            /* Updated to 14px */
-
-        }
-
-        /* Table & Section Styles */
-        /* Table & Section Styles */
-        .section-title {
-            background: #f1f5f9;
-            /* Light Slate - softer than solid dark */
-            color: var(--brand-primary);
-            /* Dark Slate Text */
-            padding: 8px 12px;
-            font-size: 12px;
-            font-weight: 700;
-            text-transform: uppercase;
-            /* Modern editorial feel */
-            letter-spacing: 1px;
-            margin-top: 30px;
-            /* Increased from 24px */
-            margin-bottom: 12px;
-            /* Increased from 8px */
-            /* Space before table */
-            border-left: 4px solid var(--accent-blue);
-            /* Matches Summary Box */
-            border-radius: 0 4px 4px 0;
-            display: flex;
-            align-items: center;
+        #footer-content {
+            position: running(footerContent);
             width: 100%;
+            font-size: 8pt;
+            color: #64748b;
+            line-height: 1.3;
+            border-top: 1px solid #cbd5e1;
+            padding-top: 8px;
+        }
+
+        .new-page { page-break-before: always; }
+
+        /* Keep table padding inside declared width (prevents right-edge bleed) */
+        .info-table,
+        .results-table,
+        .summary-table,
+        .dense-table,
+        .banner-layout {
+            box-sizing: border-box;
+        }
+        .info-table td,
+        .results-table th,
+        .results-table td,
+        .summary-table th,
+        .summary-table td,
+        .dense-table th,
+        .dense-table td,
+        .banner-layout td {
             box-sizing: border-box;
         }
 
-        .text-danger {
-            color: #dc2626 !important;
-            /* Red-600 */
-            font-weight: 700;
+        @media print {
+            .print-preview-btn { display: none !important; }
+            .screen-footer { display: none !important; }
         }
 
-        table {
+        /* Page 1 — carrier-aligned margins, spaced to fill the sheet */
+        .page-1 {
+            padding: 0 4px;
+        }
+
+        .brand-header {
+            border-bottom: 1.5px solid var(--accent-blue);
+            padding-bottom: 8px;
+            margin-bottom: 18px;
+            display: block;
             width: 100%;
-            border-collapse: collapse;
-            /* Keep collapse for clean row lines */
-            table-layout: fixed;
-            margin-bottom: 25px;
-            /* Increased from 8px */
-            border: none;
-            /* Remove outer border */
+            clear: both;
+            overflow: hidden;
         }
-
-        th,
-        td {
-            border: none;
-            /* Remove boxy borders */
-            border-bottom: 1px solid var(--border-color);
-            /* Clean row separators */
-            padding: 6px 8px;
-            /* Slightly more breathing room vertically */
-            font-size: 11px;
-            text-align: left;
+        .brand-name {
+            float: left;
+            font-size: 18pt;
+            font-weight: 500;
+            color: var(--brand-primary);
+            letter-spacing: -0.01em;
+            white-space: nowrap;
+            line-height: 40px;
+        }
+        .brand-subtitle {
+            float: left;
+            font-size: 9pt;
+            color: var(--accent-blue);
+            margin-left: 12px;
+            line-height: 42px;
+            font-weight: 500;
+        }
+        .brand-logo {
+            float: right;
+            line-height: 40px;
+            padding-right: 2px;
+        }
+        .brand-logo img {
+            height: 40px;
             vertical-align: middle;
         }
 
-        th {
-            background: transparent;
-            /* Remove gray box, clean look */
-            width: 35%;
+        .info-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 35px;
+            table-layout: fixed;
+            clear: both;
+        }
+        .info-table td {
+            padding: 4px 0;
+            vertical-align: middle;
+            border-bottom: 1px solid #f1f5f9;
+            font-size: 7.5pt;
+        }
+        .label {
+            display: inline;
+            font-size: 7.5pt;
+            color: #64748b;
+            text-transform: uppercase;
+            font-weight: 500;
+            margin-right: 4px;
+        }
+        .value { display: inline; color: #1e293b; }
+
+        .banner {
+            padding: 10px 14px;
+            border-radius: 4px;
+            margin-top: 0;
+            margin-bottom: 22px;
+        }
+        .banner-low { background-color: #f0fdf4; color: #15803d; border: 1px solid #15803d; }
+        .banner-high { background-color: #fff1f2; color: #be123c; border: 1px solid #be123c; }
+        .banner-layout {
+            width: 100%;
+            border-collapse: collapse;
+            border: none;
+        }
+        .banner-layout td {
+            border: none;
+            padding: 0;
+            vertical-align: top;
+        }
+        .banner-result-cell { width: 62%; padding-right: 14px; }
+        .banner-meta-cell { width: 38%; text-align: right; vertical-align: middle; padding-right: 2px; }
+        .status-text { font-size: 11pt; font-weight: 500; margin: 0; line-height: 1.25; }
+        .banner-desc { margin: 4px 0 0 0; font-size: 8pt; color: #334155; line-height: 1.3; }
+        .banner-meta-row { margin: 0; line-height: 1.4; }
+        .banner-meta-row + .banner-meta-row { margin-top: 6px; }
+        .banner-meta-label {
+            font-size: 7pt;
             color: var(--text-muted);
-            /* Softer label */
+            text-transform: uppercase;
+            font-weight: 500;
+            margin-right: 4px;
+        }
+        .banner-meta-value {
+            font-size: 11pt;
+            font-weight: 500;
+            color: #1e293b;
+        }
+
+        .section-title {
+            margin-top: 16px;
+            font-size: 10.5pt;
+            font-weight: 500;
+            color: #0f172a;
+            padding-bottom: 4px;
+            text-transform: uppercase;
+            display: block;
+            width: 100%;
+        }
+        .section-title.first { margin-top: 0; }
+
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 14px;
+            table-layout: fixed;
+        }
+        .results-table thead th {
+            text-align: left;
+            font-size: 8pt;
+            color: #64748b;
+            border-bottom: 1.5px solid #cbd5e1;
+            padding: 5px 8px 5px 5px;
+            text-transform: uppercase;
             font-weight: 500;
         }
-
-        td {
-            color: var(--brand-primary);
-            /* Dark data */
-            font-weight: 600;
-            /* Emphasize result */
-        }
-
-        .interpretation-box {
-            padding: 15px;
-            border: 1px solid var(--border-color);
-            border-top: none;
-            font-size: 11px;
-            flex-grow: 1;
-            /* Expand to fill available space */
-        }
-
-        .footer {
-            margin-top: auto;
-            /* Push to bottom */
-            font-size: 10px;
-            color: var(--text-muted);
-            border-top: 1px solid var(--border-color);
-            padding-top: 10px;
-            /* Reduced from 15px */
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-end;
+        .results-table thead th:last-child { padding-right: 10px; }
+        .results-table tbody td {
             text-align: left;
+            padding: 6px 8px 6px 5px;
+            border-bottom: 1px solid #f1f5f9;
+            font-size: 7.5pt;
+            vertical-align: top;
+            line-height: 1.35;
+        }
+        .results-table tbody td:last-child { padding-right: 10px; }
+        .results-table tbody td.col-condition {
+            color: #334155;
+            font-weight: 500;
+        }
+        .results-table tbody td.col-result {
+            color: #1e293b;
+            font-weight: 500;
+        }
+        .results-table tbody td.empty-cell {
+            border-bottom-color: transparent;
+        }
+        .text-danger { color: #be123c !important; font-weight: 600; }
+
+        .summary-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 25px;
+        }
+        .summary-table th {
+            text-align: left;
+            font-size: 8pt;
+            color: #64748b;
+            border-bottom: 1.5px solid #cbd5e1;
+            padding: 4px 5px;
+            text-transform: uppercase;
+            font-weight: 500;
+        }
+        .summary-table td {
+            padding: 8px 5px;
+            border-bottom: 1px solid #f1f5f9;
+            font-size: 8pt;
+            vertical-align: top;
+            color: #334155;
         }
 
-        /* Reference Data Tables (non-bold) */
-        .reference-table td {
-            font-weight: 400;
+        .clinical-statement {
+            font-size: 7.5pt;
+            color: #64748b;
+            line-height: 1.42;
+            text-align: justify;
+            margin-bottom: 0;
+            margin-top: 4px;
+            background: var(--bg-summary);
+            padding: 12px 12px 12px 14px;
+            border-left: 5px solid var(--accent-blue);
+            border-radius: 0 4px 4px 0;
+            page-break-inside: avoid;
+        }
+        .page-1 .section-title:last-of-type { margin-top: 18px; }
+
+        .detail-text {
+            font-size: 8pt;
+            color: #334155;
+            margin: 2px 0 0 0;
+            text-align: justify;
+            line-height: 1.3;
+        }
+        .detail-text p { margin: 0 0 8px 0; }
+        .detail-text ol {
+            margin: 0;
+            padding-left: 18px;
+            font-size: 7.5pt;
+            line-height: 1.35;
         }
 
-        /* Dense Table for Page 3 */
         .dense-table {
             width: 100%;
             border-collapse: collapse;
             margin-bottom: 0;
         }
-
-        /* Dense Table for Page 3 */
-        .dense-table th,
+        .dense-table th {
+            text-align: left;
+            font-size: 7pt;
+            color: #64748b;
+            border-bottom: 1.5px solid #cbd5e1;
+            padding: 3px 4px;
+            text-transform: uppercase;
+            font-weight: 500;
+        }
         .dense-table td {
-            padding: 1px 2px;
-            /* Ultra-dense to guarantee A4 fit */
-            font-size: 9px;
-            line-height: 1.1;
-            text-align: center;
+            padding: 3px 4px;
             border-bottom: 1px solid #f1f5f9;
+            font-size: 7pt;
+            line-height: 1.25;
+            vertical-align: top;
+            color: #475569;
             font-weight: 400;
         }
 
-        /* Print Optimization */
-        /* Native Paged Media Configuration */
-        @page {
-            size: A4;
-            margin: 10mm 10mm 25mm 10mm;
-            /* Top Right Bottom Left */
-
-            /* Full Width Footer Container */
-            @bottom-center {
-                content: element(footerContent);
-                width: 100%;
-                vertical-align: bottom;
-                padding-bottom: 5mm;
-            }
-
-            @bottom-left {
-                content: none;
-            }
-
-            @bottom-right {
-                content: none;
-            }
+        /* Page 3 — comprehensive microdeletion panel (single page, fill sheet) */
+        .page-microdeletion .brand-header {
+            margin-bottom: 8px;
+            padding-bottom: 4px;
         }
-
-        /* Running Footer Definition */
-        #footer-content {
-            position: running(footerContent);
-            width: 100%;
-            font-size: 9px;
-            color: #64748b;
-            border-top: 1px solid #e2e8f0;
-            padding-top: 10px;
-            /* Clearfix for floats */
-            overflow: hidden;
+        .page-microdeletion .brand-name {
+            font-size: 14pt;
+            line-height: 28px;
         }
-
-        .footer-left {
-            float: left;
+        .page-microdeletion .brand-subtitle {
+            font-size: 8pt;
+            line-height: 30px;
+            margin-left: 8px;
+        }
+        .page-microdeletion .brand-logo {
+            line-height: 28px;
+        }
+        .page-microdeletion .brand-logo img {
+            height: 28px;
+        }
+        .page-microdeletion .section-title {
+            margin-top: 0;
+            margin-bottom: 6px;
+            font-size: 9pt;
+            padding-bottom: 2px;
+        }
+        .dense-table.dense-table-panel th,
+        .dense-table.dense-table-panel td {
+            padding: 2px 4px;
+            font-size: 5.5pt;
+            line-height: 1.1;
+            vertical-align: top;
             text-align: left;
-            line-height: 1.3;
+            word-break: break-word;
+            hyphens: auto;
+        }
+        .dense-table.dense-table-panel thead th {
+            font-size: 5.5pt;
+            padding: 3px 4px;
+            line-height: 1.1;
+            border-bottom: 1px solid #cbd5e1;
+        }
+        .dense-table.dense-table-panel tbody tr {
+            height: 17pt;
+        }
+        .dense-table.dense-table-panel tbody td {
+            border-bottom: 1px solid #f1f5f9;
         }
 
-        .footer-right {
-            float: right;
-            text-align: right;
+        .screen-footer {
+            display: none;
         }
-
-        /* Inject Page counter into the right float */
-        .footer-right::after {
-            content: "Page " counter(page) " of " counter(pages);
-        }
-
-        #footer-content::after {
-            content: none;
-        }
-
-        /* Screen Fallback: Hide Running Footer if not printing */
         @media screen {
-            #footer-content {
-                display: none;
+            .screen-footer {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                margin-top: 20px;
+                padding-top: 10px;
+                border-top: 1px solid #cbd5e1;
+                font-size: 8pt;
+                color: #94a3b8;
+                width: 100%;
             }
         }
 
-        /* Global Footer (Hidden on Screen) */
-        /* Print Optimization - Clean Parity */
-        @media print {
-            body {
-                background: white;
-                margin: 0;
-                font-size: 10px !important;
-                /* Scale down for PDF */
-                line-height: 1.3;
-            }
-
-            /* Explicitly scale down headers/tables */
-            h1,
-            h2,
-            h3,
-            .section-title,
-            .header {
-                font-size: 12px !important;
-            }
-
-            /* Smaller Result Summary */
-            /* Smaller Result Summary Override REMOVED to allow user control */
-            /* .result-summary-box { font-size: 9px !important; } */
-
-            .result-main {
-                font-size: 18px !important;
-                /* Explicit 18px for print */
-            }
-
-            /* Preserve larger font for Gender/FF */
-            .gender-text {
-                font-size: 14px !important;
-            }
-
-            .ff-box {
-                font-size: 14px !important;
-                font-weight: 400 !important;
-                /* Force non-bold */
-                /* Removed explicit color strict override */
-            }
-
-            table,
-            th,
-            td {
-                font-size: 11px !important;
-                /* Increased from 10px */
-                padding: 4px !important;
-                box-sizing: border-box !important;
-                /* Critical for 100% width containment */
-            }
-
-            .dense-table th,
-            .dense-table td {
-                font-size: 9.5px !important;
-                /* Increased to 10px per user request */
-                padding: 1px 4px !important;
-                /* Keep padding tight */
-                line-height: 1.1 !important;
-                /* Slightly relaxed */
-            }
-
-            /* Limit margin specifically for dense tables */
-            table.dense-table {
-                margin-bottom: 0px !important;
-                /* Remove margin for Page 3 */
-            }
-
-            .page-break {
-                display: block;
-                break-before: page;
-                page-break-before: always;
-            }
-
-            /* Main Content Container */
-            .report-page {
-                width: 100% !important;
-                height: auto !important;
-                margin: 0 !important;
-                padding: 0 !important;
-                /* Managed by @page margins */
-                border: none !important;
-                box-shadow: none !important;
-                display: block !important;
-            }
-
-            /* Hide Old Footer in Flow */
-            .footer {
-                display: none !important;
-            }
-
-            /* Ensure Header spans width */
-            .header {
-                width: 100% !important;
-                border-bottom: 1px solid #0f172a !important;
-                margin-bottom: 20px !important;
-                display: block !important;
-                /* Robust for PDF */
-                overflow: hidden;
-            }
-
-            .header .logo-text {
-                float: left !important;
-                padding-top: 28px !important;
-                /* Adjusted for larger font (50px - 22px = 28px top safe) */
-                /* Push to bottom */
-                line-height: 1 !important;
-                margin: 0 !important;
-                font-size: 22px !important;
-                /* Forces larger header text */
-            }
-
-            .header img {
-                float: right !important;
-                height: 50px !important;
-                /* Restore larger logo size */
-            }
-
-            /* Restore spacing for major sections in Block layout */
-            .patient-grid {
-                margin-bottom: 35px !important;
-                /* Increased from 20px */
-                width: 100% !important;
-                box-sizing: border-box !important;
-            }
-
-            .result-summary-box,
-            .aneuploidies-section {
-                margin-bottom: 20px !important;
-                width: 100% !important;
-                box-sizing: border-box !important;
-                /* Prevent padding from causing overflow */
-            }
-
-            /* Hide Preview Button */
-            .print-preview-btn {
-                display: none !important;
-            }
-        }
-
-        /* Print Preview Button */
         .print-preview-btn {
             position: fixed;
-            top: 20px;
-            right: 20px;
-            background: #0f172a;
-            color: white;
-            padding: 10px 20px;
-            border-radius: 8px;
+            top: 16px;
+            right: 16px;
+            background: var(--brand-primary);
+            color: #fff;
+            padding: 8px 16px;
+            border-radius: 6px;
             cursor: pointer;
             z-index: 10000;
-            font-family: sans-serif;
-            font-weight: bold;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            border: 2px solid #06b6d4;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            font-size: 12px;
+            font-weight: 500;
+            border: 1px solid var(--accent-blue);
         }
-
-        .print-preview-btn:hover {
-            background: #1e293b;
-        }
+        .print-preview-btn:hover { background: #1e293b; }
     </style>
 </head>
-
 <body>
 
-    <!-- Native Paged Media Running Footer -->
-    <div id="footer-content">
-        <div class="footer-left">
-            Union Clinical Labs, No. 33, Lane 151, Section 2, Fuxing 5 Rd., Da'an District., Taipei City 106, Taiwan
-            (R.O.C)<br>
-            <strong>Lab Director: Min-Long Lai, PhD</strong> | CAP#: 6979606
-        </div>
-        <div class="footer-right"></div>
+<div id="header-content">
+    {{ Patient_Name }} | Order ID: {{ Order_ID }}
+</div>
+
+<div id="footer-content">
+    Union Clinical Labs | No. 33, Lane 151, Section 2, Fuxing 5 Rd., Da'an District, Taipei City 106, Taiwan (R.O.C.)<br>
+    <strong>Lab Director: Min-Long Lai, PhD</strong> | CAP#: 6979606
+</div>
+
+<div class="page-1">
+    <div class="brand-header">
+        <div class="brand-name">Non-Invasive Prenatal Screening</div>
+        <div class="brand-subtitle">Cell-Free DNA Analysis</div>
+        <div class="brand-logo"><img src="genolyx_logo.png" alt="Genolyx"></div>
     </div>
 
+    <table class="info-table">
+        <tr>
+            <td><span class="label">Patient Name:</span> <span class="value">{{ Patient_Name }}</span></td>
+            <td><span class="label">Sample Number:</span> <span class="value">{{ Sample_Number }}</span></td>
+        </tr>
+        <tr>
+            <td><span class="label">Date of Birth:</span> <span class="value">{{ DOB }}</span></td>
+            <td><span class="label">Physician:</span> <span class="value">{{ Doctor }}</span></td>
+        </tr>
+        <tr>
+            <td><span class="label">Gestational Age:</span> <span class="value">{{ W }} Weeks {{ D }} Days</span></td>
+            <td><span class="label">Hospital / Clinic:</span> <span class="value">{{ Hospital }}</span></td>
+        </tr>
+        <tr>
+            <td><span class="label">Pregnancy Type:</span> <span class="value">{{ Pregnancy_Type }}</span></td>
+            <td><span class="label">Collection Date:</span> <span class="value">{{ Draw }}</span></td>
+        </tr>
+        <tr>
+            <td><span class="label">MRN:</span> <span class="value">{{ MRN }}</span></td>
+            <td><span class="label">Report Date:</span> <span class="value">{{ Report }}</span></td>
+        </tr>
+        <tr>
+            <td><span class="label">Indication:</span> <span class="value">{{ Indication }}</span></td>
+            <td><span class="label">Order ID:</span> <span class="value">{{ Order_ID }}</span></td>
+        </tr>
+    </table>
 
+    {% set is_high = (Result_MDResult == 'High Risk') %}
+    <div class="banner {% if is_high %}banner-high{% else %}banner-low{% endif %}">
+        <table class="banner-layout">
+            <tr>
+                <td class="banner-result-cell">
+                    <p class="status-text">Overall Result: {{ Result_MDResult }}</p>
+                    <p class="banner-desc">Non-invasive prenatal screening for common fetal chromosome abnormalities.</p>
+                </td>
+                <td class="banner-meta-cell">
+                    <p class="banner-meta-row"><span class="banner-meta-label">Predicted Fetal Sex</span><span class="banner-meta-value">{{ Gender }}</span></p>
+                    <p class="banner-meta-row"><span class="banner-meta-label">Fetal Fraction</span><span class="banner-meta-value">{{ FF_YFF }}</span></p>
+                </td>
+            </tr>
+        </table>
+    </div>
 
-    <div class="report-page">
-        <div class="header">
-            <div class="logo-text" style="color: var(--brand-primary); font-size: 22px; font-weight: 700;">Non-Invasive
-                Prenatal Screening</div>
-            <img src="genolyx_logo.png" alt="Genolyx" style="height: 50px;">
-        </div>
-
-        <div class="patient-grid">
-            <div class="col">
-                <div class="info-row"><span class="label">Patient Name:</span> <span>{{Patient_Name}}</span></div>
-                <div class="info-row"><span class="label">Date of Birth:</span> <span>{{DOB}}</span></div>
-                <div class="info-row"><span class="label">Gestational Age:</span> <span>{{W}} Weeks {{D}} Days</span>
-                </div>
-                <div class="info-row"><span class="label">Pregnancy Type:</span> <span>{{Pregnancy_Type}}</span></div>
-                <div class="info-row"><span class="label">Medical Record Number (MRN):</span> <span>{{MRN}}</span></div>
-                <div class="info-row"><span class="label">Indication:</span> <span>{{Indication}}</span></div>
-            </div>
-            <div class="col">
-                <div class="info-row"><span class="label">Sample Number:</span> <span>{{Sample_Number}}</span></div>
-                <div class="info-row"><span class="label">Physician:</span> <span>{{Doctor}}</span></div>
-                <div class="info-row"><span class="label">Hospital/Clinic:</span> <span>{{Hospital}}</span></div>
-                <div class="info-row"><span class="label">Collection Date:</span> <span>{{Draw}}</span></div>
-                <div class="info-row"><span class="label">Report Date:</span> <span>{{Report}}</span></div>
-                <div class="info-row"><span class="label">Order ID:</span> <span>{{Order_ID}}</span></div>
-            </div>
-        </div>
-
-        <div class="result-summary-box">
-            <div class="result-main {% if Result_MDResult == 'High Risk' %}text-danger{% endif %}">Overall Result:
-                {{Result_MDResult}}</div>
-            <div class="gender-text">Predicted Gender: <strong>{{Gender}}</strong></div>
-            <div class="ff-box">Fetal Fraction: {{FF_YFF}}</div>
-        </div>
-
-        <div class="section-title">Chromosomal Aneuploidies</div>
-        <table>
-            <thead>
-                <tr>
-                    <th scope="col">Condition</th>
-                    <td>Result</td>
-                    <th scope="col">Condition</th>
-                    <td>Result</td>
-                </tr>
-            </thead>
-            <tbody>
-                {% for row in aneuploidy_rows %}
-                <tr>
-                    {% for item in row %}
-                    <th scope="col">{{ item.condition }}</th>
-                    <td class="{% if item.result == 'High Risk' %}text-danger{% endif %}">{{ item.result }}</td>
-                    {% endfor %}
-                    {% if row|length < 2 %} <th scope="col">
-                        </th>
-                        <td></td>
-                        {% endif %}
-                </tr>
+    <div class="section-title first">Chromosomal Aneuploidies</div>
+    <table class="results-table">
+        <thead>
+            <tr>
+                <th style="width:35%;">Condition</th>
+                <th style="width:15%;">Result</th>
+                <th style="width:35%;">Condition</th>
+                <th style="width:15%;">Result</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in aneuploidy_rows %}
+            <tr>
+                {% for item in row %}
+                <td class="col-condition">{{ item.condition }}</td>
+                <td class="col-result {% if item.result == 'High Risk' %}text-danger{% endif %}">{{ item.result }}</td>
                 {% endfor %}
-            </tbody>
-        </table>
+                {% if row|length < 2 %}
+                <td class="col-condition empty-cell"></td>
+                <td class="col-result empty-cell"></td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
 
-        {% if microdeletion_page1_rows|length > 0 %}
-        <div class="section-title">Microdeletions & Duplications</div>
-        <table>
-            <thead>
-                <tr>
-                    <th scope="col">Condition</th>
-                    <td>Result</td>
-                    <th scope="col">Condition</th>
-                    <td>Result</td>
-                </tr>
-            </thead>
-            <tbody>
-                {% for row in microdeletion_page1_rows %}
-                <tr>
-                    {% for item in row %}
-                    <th scope="col">{{ item.condition }}</th>
-                    <td class="{% if item.result == 'High Risk' %}text-danger{% endif %}">{{ item.result }}</td>
-                    {% endfor %}
-                    {% if row|length < 2 %} <th scope="col">
-                        </th>
-                        <td></td>
-                        {% endif %}
-                </tr>
+    {% if microdeletion_page1_rows|length > 0 %}
+    <div class="section-title">Microdeletions &amp; Duplications</div>
+    <table class="results-table">
+        <thead>
+            <tr>
+                <th style="width:35%;">Condition</th>
+                <th style="width:15%;">Result</th>
+                <th style="width:35%;">Condition</th>
+                <th style="width:15%;">Result</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in microdeletion_page1_rows %}
+            <tr>
+                {% for item in row %}
+                <td class="col-condition">{{ item.condition }}</td>
+                <td class="col-result {% if item.result == 'High Risk' %}text-danger{% endif %}">{{ item.result }}</td>
                 {% endfor %}
-            </tbody>
-        </table>
-        {% endif %}
-
-        <div class="section-title">Interpretation</div>
-        <div class="interpretation-box" {% if microdeletion_page1_rows|length==0
-            %}style="flex-grow: 0; min-height: 150px;" {% endif %}>
-            {{Interpretation_MDI}}
-        </div>
-
-        <div class="footer">
-            <div class="footer-info">
-                Union Clinical Labs, No. 33, Lane 151, Section 2, Fuxing 5 Rd., Da'an District., Taipei City 106, Taiwan
-                (R.O.C)<br>
-                <strong>Lab Director: Min-Long Lai, PhD</strong> | CAP#: 6979606
-            </div>
-            <div class="page-number">Page 1 of {{ total_pages }}</div>
-        </div>
-    </div>
-
-    <div class="report-page" style="break-before: always;">
-        <div class="header">
-            <div class="logo-text" style="color: var(--brand-primary); font-size: 22px; font-weight: 700;">Non-Invasive
-                Prenatal Screening</div>
-            <img src="genolyx_logo.png" alt="Genolyx" style="height: 50px;">
-        </div>
-
-        <div class="section-title" style="margin-top: 0;">Performance Metrics</div>
-        <table class="reference-table">
-            <thead>
-                <tr>
-                    <th scope="col" style="width: 40%;">Condition</th>
-                    <th scope="col" style="width: 20%;">Sensitivity</th>
-                    <th scope="col" style="width: 20%;">Specificity</th>
-                    <th scope="col" style="width: 20%;">PPV</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td>Trisomy 21</td>
-                    <td>99.72%</td>
-                    <td>&gt;99%</td>
-                    <td>98.72%</td>
-                </tr>
-                <tr>
-                    <td>Trisomy 18</td>
-                    <td>99.04%</td>
-                    <td>&gt;99%</td>
-                    <td>96.49%</td>
-                </tr>
-                <tr>
-                    <td>Trisomy 13</td>
-                    <td>98.84%</td>
-                    <td>&gt;99%</td>
-                    <td>85.71%</td>
-                </tr>
-                <tr>
-                    <td>Monosomy X</td>
-                    <td>&gt;99%</td>
-                    <td>&gt;99%</td>
-                    <td>76%</td>
-                </tr>
-                <tr>
-                    <td>XXX</td>
-                    <td>&gt;99%</td>
-                    <td>&gt;99%</td>
-                    <td>&gt;99%</td>
-                </tr>
-                <tr>
-                    <td>XXY</td>
-                    <td>&gt;99%</td>
-                    <td>&gt;99%</td>
-                    <td>&gt;99%</td>
-                </tr>
-                <tr>
-                    <td>XYY</td>
-                    <td>&gt;99%</td>
-                    <td>&gt;99%</td>
-                    <td>&gt;99%</td>
-                </tr>
-                <tr>
-                    <td>T9, T16, T22</td>
-                    <td>&gt;99%</td>
-                    <td>&gt;99%</td>
-                    <td>50-99%</td>
-                </tr>
-                <tr>
-                    <td>All Other Trisomy</td>
-                    <td>&gt;99%</td>
-                    <td>&gt;99%</td>
-                    <td>NA</td>
-                </tr>
-                <tr>
-                    <td>Microdeletions/duplications</td>
-                    <td>20-99%</td>
-                    <td>&gt;99%</td>
-                    <td>NA</td>
-                </tr>
-            </tbody>
-        </table>
-
-
-
-        <div style="font-size: 8.5px; color: var(--text-muted); margin-top: 5px; line-height: 1.2;">
-            <p style="margin-bottom: 2px;"><strong>Limitations:</strong> This test is designed to screen for fetal
-                chromosome abnormalities in singleton pregnancies that are at least 10 weeks gestation, as estimated by
-                last menstrual period. Microdeletion sensitivity is dependent on size and fetal fraction; the minimum
-                detectable size is 0.5 MB at 4% fetal fraction. However, it is important to note that this test does not
-                rule out the possibility of other chromosomal or subchromosomal abnormalities, birth defects, or other
-                conditions. Additionally, this test is not intended to identify pregnancies at risk for open neural tube
-                defects. A negative test result does not mean that there are no chromosomal abnormalities present. There
-                is a small chance that the test results may not reflect the chromosomes of the fetus, but may instead
-                reflect chromosomal changes of the placenta or of the mother.</p>
-
-            <p style="margin-bottom: 4px;"><strong>Methods:</strong> UCL laboratory performed low pass whole genome
-                sequencing from extracted cfDNA. The sequencing data was validated in-house at UCL laboratory. PPV
-                performance was calculated based on amniocentesis and QF-PCR results. Due to the insufficient number of
-                amniocentesis samples, Sensitivity was calculated by estimating true positives based on PPV.</p>
-
-            <p style="margin-bottom: 2px;"><strong>References:</strong></p>
-            <ol style="margin: 0; padding-left: 15px; line-height: 1.1; font-size: 8px;">
-                <li>Anthony R et al., Noninvasive prenatal screening for fetal aneuploidy 2016 update: a position
-                    statement of the American College of Medical Genetics and Genomics. Genet Med 2016; 13:1056-65.</li>
-                <li>Bianchi DW et al., DNA sequencing versus standard prenatal aneuploidy screening. N Engl J Med. 2014;
-                    370:799-808.</li>
-                <li>YM Dennis Lo, RWK Chiu, Noninvasive prenatal diagnosis of fetal chromosomal aneuploidies by maternal
-                    plasma nucleic acid analysis; Clinical chemistry, 2008.</li>
-                <li>Chen, M., et al., Validation of fetal DNA fraction estimation and its application in noninvasive
-                    prenatal testing for aneuploidy detection in multiple pregnancies. Prenatal Diagnosis, 2019. 39(13):
-                    p. 1273-1282.</li>
-            </ol>
-        </div><!-- Spacer removed for absolute footer -->
-
-        <div class="footer">
-            <div class="footer-info">
-                Union Clinical Labs, No. 33, Lane 151, Section 2, Fuxing 5 Rd., Da'an District., Taipei City 106, Taiwan
-                (R.O.C)<br>
-                <strong>Lab Director: Min-Long Lai, PhD</strong> | CAP#: 6979606
-            </div>
-            <div class="page-number">Page 2 of {{ total_pages }}</div>
-        </div>
-    </div>
-
-    {% if show_page3 %}
-    <div class="report-page" style="break-before: always;">
-        <div class="header" style="margin-bottom: 10px !important;"> <!-- Reduced margin for Page 3 fit -->
-            <div class="logo-text" style="color: var(--brand-primary); font-size: 22px; font-weight: 700;">Non-Invasive
-                Prenatal Screening</div>
-            <img src="genolyx_logo.png" alt="Genolyx" style="height: 50px;">
-        </div>
-
-        <div class="section-title" style="margin-top: 0; margin-bottom: 5px !important;">Microdeletions/duplications
-            syndromes</div>
-
-        <table class="dense-table" style="margin-bottom: 0 !important;"> <!-- Remove bottom margin -->
-            <thead>
-                <tr>
-                    <th scope="col" style="width: 25%;">Condition</th>
-                    <th scope="col" style="width: 25%;">Condition</th>
-                    <th scope="col" style="width: 25%;">Condition</th>
-                    <th scope="col" style="width: 25%;">Condition</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for row in microdeletion_page3_rows %}
-                <tr>
-                    {% for item in row %}
-                    <td>{{ item }}</td>
-                    {% endfor %}
-                    {% for i in range(4 - row|length) %}
-                    <td></td>
-                    {% endfor %}
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-
-        <!-- Spacer removed for absolute footer -->
-
-        <div class="footer">
-            <div class="footer-info">
-                Union Clinical Labs, No. 33, Lane 151, Section 2, Fuxing 5 Rd., Da'an District., Taipei City 106, Taiwan
-                (R.O.C)<br>
-                <strong>Lab Director: Min-Long Lai, PhD</strong> | CAP#: 6979606
-            </div>
-            <div class="page-number">Page 3 of {{ total_pages }}</div>
-        </div>
-    </div>
+                {% if row|length < 2 %}
+                <td class="col-condition empty-cell"></td>
+                <td class="col-result empty-cell"></td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
     {% endif %}
 
-    <!-- Print Preview Toggle -->
-    <button class="print-preview-btn" onclick="document.body.classList.toggle('print-preview')">
-        Toggle PDF Preview Mode
-    </button>
+    <div class="section-title">Interpretation</div>
+    <div class="clinical-statement">{{ Interpretation_MDI }}</div>
+
+    <div class="screen-footer">
+        <span>Union Clinical Labs — NIPS Report</span>
+        <span>Page 1 of {{ total_pages }}</span>
+    </div>
+</div>
+
+<div class="new-page">
+    <div class="brand-header">
+        <div class="brand-name">Non-Invasive Prenatal Screening</div>
+        <div class="brand-subtitle">Performance &amp; Methods</div>
+        <div class="brand-logo"><img src="genolyx_logo.png" alt="Genolyx"></div>
+    </div>
+
+    <div class="section-title first">Performance Metrics</div>
+    <table class="summary-table">
+        <thead>
+            <tr>
+                <th style="width:40%;">Condition</th>
+                <th style="width:20%;">Sensitivity</th>
+                <th style="width:20%;">Specificity</th>
+                <th style="width:20%;">PPV</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr><td>Trisomy 21</td><td>99.72%</td><td>&gt;99%</td><td>98.72%</td></tr>
+            <tr><td>Trisomy 18</td><td>99.04%</td><td>&gt;99%</td><td>96.49%</td></tr>
+            <tr><td>Trisomy 13</td><td>98.84%</td><td>&gt;99%</td><td>85.71%</td></tr>
+            <tr><td>Monosomy X</td><td>&gt;99%</td><td>&gt;99%</td><td>76%</td></tr>
+            <tr><td>XXX</td><td>&gt;99%</td><td>&gt;99%</td><td>&gt;99%</td></tr>
+            <tr><td>XXY</td><td>&gt;99%</td><td>&gt;99%</td><td>&gt;99%</td></tr>
+            <tr><td>XYY</td><td>&gt;99%</td><td>&gt;99%</td><td>&gt;99%</td></tr>
+            <tr><td>T9, T16, T22</td><td>&gt;99%</td><td>&gt;99%</td><td>50–99%</td></tr>
+            <tr><td>All Other Trisomy</td><td>&gt;99%</td><td>&gt;99%</td><td>NA</td></tr>
+            <tr><td>Microdeletions / duplications</td><td>20–99%</td><td>&gt;99%</td><td>NA</td></tr>
+        </tbody>
+    </table>
+
+    <div class="section-title">Methods and Limitations</div>
+    <div class="detail-text">
+        <p><strong>Limitations:</strong> This test is designed to screen for fetal chromosome abnormalities in singleton pregnancies that are at least 10 weeks gestation, as estimated by last menstrual period. Microdeletion sensitivity is dependent on size and fetal fraction; the minimum detectable size is 0.5 MB at 4% fetal fraction. This test does not rule out other chromosomal or subchromosomal abnormalities, birth defects, or open neural tube defects. A negative result does not exclude all chromosomal abnormalities. There is a small chance results may reflect placental or maternal chromosomal changes rather than the fetus.</p>
+        <p><strong>Methods:</strong> Low-pass whole-genome sequencing from extracted cell-free DNA. Sequencing data validated in-house. PPV performance calculated from amniocentesis and QF-PCR results. Where amniocentesis samples were insufficient, sensitivity was estimated from PPV.</p>
+        <p><strong>References:</strong></p>
+        <ol>
+            <li>Anthony R et al., Noninvasive prenatal screening for fetal aneuploidy 2016 update: a position statement of the American College of Medical Genetics and Genomics. Genet Med 2016; 13:1056-65.</li>
+            <li>Bianchi DW et al., DNA sequencing versus standard prenatal aneuploidy screening. N Engl J Med. 2014; 370:799-808.</li>
+            <li>Lo YMD, Chiu RWK, Noninvasive prenatal diagnosis of fetal chromosomal aneuploidies by maternal plasma nucleic acid analysis. Clin Chem, 2008.</li>
+            <li>Chen M. et al., Validation of fetal DNA fraction estimation and its application in NIPT for aneuploidy detection in multiple pregnancies. Prenat Diagn, 2019. 39(13): 1273-1282.</li>
+        </ol>
+    </div>
+
+    <div class="screen-footer">
+        <span>Union Clinical Labs — NIPS Report</span>
+        <span>Page 2 of {{ total_pages }}</span>
+    </div>
+</div>
+
+{% if show_page3 %}
+<div class="new-page page-microdeletion">
+    <div class="brand-header">
+        <div class="brand-name">Non-Invasive Prenatal Screening</div>
+        <div class="brand-subtitle">Comprehensive Microdeletion Panel</div>
+        <div class="brand-logo"><img src="genolyx_logo.png" alt="Genolyx"></div>
+    </div>
+
+    <div class="section-title first">Microdeletions / Duplications Syndromes Evaluated</div>
+    <table class="dense-table dense-table-panel">
+        <thead>
+            <tr>
+                <th style="width:25%;">Region / Syndrome</th>
+                <th style="width:25%;">Region / Syndrome</th>
+                <th style="width:25%;">Region / Syndrome</th>
+                <th style="width:25%;">Region / Syndrome</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in microdeletion_page3_rows %}
+            <tr>
+                {% for item in row %}
+                <td>{{ item }}</td>
+                {% endfor %}
+                {% for i in range(4 - row|length) %}
+                <td></td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="screen-footer">
+        <span>Union Clinical Labs — NIPS Report</span>
+        <span>Page 3 of {{ total_pages }}</span>
+    </div>
+</div>
+{% endif %}
+
+<button class="print-preview-btn" type="button" onclick="window.print()">Print / Save PDF</button>
 
 </body>
-
 </html>
