@@ -265,6 +265,76 @@ def _gene_knowledge_row_from_parsed(parsed: Any, gene_symbol: str) -> Optional[D
     }
 
 
+def _gene_knowledge_json_prompt(gene_symbol: str) -> Tuple[str, str]:
+    """공통 JSON 프롬프트 (Gemini fallback / Ollama / OpenAI-compat 모두 사용)."""
+    system = (
+        "You are a genomics expert. Return ONLY a valid JSON object with exactly these keys: "
+        "gene_symbol, omim_number, function_summary, disease_association, inheritance, disorder_name. "
+        "Keep each value under 2 sentences. No prose, no markdown, no extra keys."
+    )
+    user = (
+        f"Gene: {gene_symbol}\n"
+        "Return JSON only:\n"
+        '{"gene_symbol":"","omim_number":"","function_summary":"","disease_association":"","inheritance":"","disorder_name":""}'
+    )
+    return system, user
+
+
+def fetch_gene_knowledge_via_openai_compat(
+    gene: str,
+    model: str,
+    base_url: str = "http://host.docker.internal:11434/v1",
+    api_key: str = "ollama",
+) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
+    """
+    Ollama / vLLM / LM Studio 등 OpenAI-compatible LLM을 통한 gene knowledge fetch.
+    Google Search 없이 순수 JSON 프롬프트만 사용합니다.
+    """
+    import asyncio
+    gene_symbol = (gene or "").strip().upper()
+    if not gene_symbol:
+        return None, "missing gene"
+    try:
+        from app.services._resolve_ai import call_ai_json
+    except ImportError:
+        try:
+            from services._resolve_ai import call_ai_json  # type: ignore
+        except ImportError:
+            return None, "call_ai_json not available"
+
+    system, user = _gene_knowledge_json_prompt(gene_symbol)
+    try:
+        loop = asyncio.new_event_loop()
+        result = loop.run_until_complete(
+            call_ai_json(
+                provider="ollama",
+                model=model,
+                api_key=api_key,
+                system_prompt=system,
+                user_content=user,
+                temperature=0.1,
+                max_tokens=400,
+                base_url=base_url,
+            )
+        )
+        loop.close()
+    except Exception as e:
+        return None, str(e)
+
+    if not result:
+        return None, "No response from LLM"
+
+    flat = {
+        "gene_symbol": result.get("gene_symbol") or gene_symbol,
+        "omim_number": result.get("omim_number") or "",
+        "function_summary": result.get("function_summary") or "",
+        "disease_association": result.get("disease_association") or "",
+        "inheritance": result.get("inheritance") or "",
+        "disorder": result.get("disorder_name") or result.get("disorder") or "",
+    }
+    return flat, None
+
+
 def fetch_gene_knowledge_via_gemini(
     gene: str,
     api_key: str,
@@ -459,6 +529,57 @@ def refresh_gene_knowledge_from_gemini(
     flat, err = fetch_gene_knowledge_via_gemini(g, api_key, model=model)
     if not flat:
         return read_gene_knowledge_full_row(g, db_path), err
+    upsert_gene_data(
+        db_path,
+        {
+            "gene_symbol": flat["gene_symbol"],
+            "function_summary": flat.get("function_summary") or "",
+            "disease_association": flat.get("disease_association") or "",
+            "omim_number": flat.get("omim_number") or "",
+            "inheritance": flat.get("inheritance") or "",
+            "disorder": flat.get("disorder") or "",
+        },
+    )
+    return read_gene_knowledge_full_row(g, db_path), None
+
+
+def refresh_gene_knowledge(
+    gene: str,
+    db_path: str,
+    *,
+    provider: str = "gemini",
+    api_key: str = "",
+    model: str = "",
+    ollama_base_url: str = "http://host.docker.internal:11434/v1",
+) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
+    """
+    Unified gene knowledge refresh — routes to Gemini or Ollama/OpenAI-compat.
+
+    Args:
+        provider: "gemini" or "ollama"
+        api_key:  Gemini API key (ignored for ollama)
+        model:    model name (e.g. "gemini-2.5-flash" or "qwen2.5:32b")
+        ollama_base_url: base URL for Ollama endpoint
+    """
+    g = (gene or "").strip().upper()
+    if not g or not db_path:
+        return None, "missing gene or db path"
+    init_gene_knowledge_database(db_path)
+
+    if provider == "ollama":
+        effective_model = model or "qwen2.5:32b"
+        flat, err = fetch_gene_knowledge_via_openai_compat(
+            g, model=effective_model, base_url=ollama_base_url
+        )
+    else:
+        if not (api_key or "").strip():
+            return read_gene_knowledge_full_row(g, db_path), "API key not set"
+        effective_model = model or "gemini-2.5-flash"
+        flat, err = fetch_gene_knowledge_via_gemini(g, api_key, model=effective_model)
+
+    if not flat:
+        return read_gene_knowledge_full_row(g, db_path), err
+
     upsert_gene_data(
         db_path,
         {

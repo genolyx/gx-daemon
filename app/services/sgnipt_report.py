@@ -10,6 +10,7 @@ Data flow:
 """
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -24,6 +25,69 @@ logger = logging.getLogger(__name__)
 
 SGNIPT_PDF_TEMPLATE_STEM = "sgnipt"
 SGNIPT_SUPPORTED_LANGUAGES = ["EN", "KO"]
+SGNIPT_LOGO_FILENAME = "genolyx_logo.png"
+
+
+def _resolve_sgnipt_template_dir(template_dir: Optional[str] = None) -> Optional[str]:
+    if template_dir and os.path.isdir(template_dir):
+        return template_dir
+    _self_dir = os.path.dirname(os.path.abspath(__file__))
+    for _up in range(5):
+        candidate = os.path.normpath(os.path.join(_self_dir, *[".."] * _up, "data", "report_templates"))
+        if os.path.isdir(candidate) and os.path.isfile(os.path.join(candidate, "sgnipt_EN.html")):
+            return candidate
+    return None
+
+
+def _report_logo_src(template_dir: Optional[str] = None) -> str:
+    """Logo for PDF + browser preview (data URI when file is available)."""
+    candidates: List[str] = []
+    try:
+        from app.config import settings
+
+        configured = (getattr(settings, "report_logo_path", None) or "").strip()
+        if configured:
+            candidates.append(configured)
+        tpl_dir = (getattr(settings, "report_template_dir", None) or "").strip()
+        if tpl_dir:
+            candidates.append(os.path.join(tpl_dir, SGNIPT_LOGO_FILENAME))
+    except Exception:
+        pass
+    resolved = _resolve_sgnipt_template_dir(template_dir)
+    if resolved:
+        candidates.append(os.path.join(resolved, SGNIPT_LOGO_FILENAME))
+    candidates.extend([
+        "/home/sam/GX_Report_html/genolyx_logo.png",
+        "/home/ken/gx-daemon/data/report_templates/genolyx_logo.png",
+    ])
+    seen = set()
+    for path in candidates:
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        if os.path.isfile(path):
+            try:
+                with open(path, "rb") as f:
+                    encoded = base64.standard_b64encode(f.read()).decode("ascii")
+                return f"data:image/png;base64,{encoded}"
+            except OSError as e:
+                logger.warning("[sgnipt_report] Could not read logo %s: %s", path, e)
+    if resolved and os.path.isfile(os.path.join(resolved, SGNIPT_LOGO_FILENAME)):
+        return SGNIPT_LOGO_FILENAME
+    return ""
+
+
+def _inline_logo_in_html(html: str, template_dir: Optional[str] = None) -> str:
+    """Replace relative logo path with embedded data URI (preview + PDF)."""
+    logo_src = _report_logo_src(template_dir)
+    if logo_src.startswith("data:"):
+        return html.replace(f'src="{SGNIPT_LOGO_FILENAME}"', f'src="{logo_src}"')
+    return html
+
+
+def _attach_report_logo(report_data: Dict[str, Any], template_dir: Optional[str] = None) -> None:
+    meta = report_data.setdefault("report_metadata", {})
+    meta["logo_src"] = _report_logo_src(template_dir) or SGNIPT_LOGO_FILENAME
 
 _ORIGIN_DISPLAY = {
     "fetal_specific": "Fetal",
@@ -387,6 +451,8 @@ def generate_sgnipt_report_json(
     if dg:
         report_data["dark_genes"] = dg
 
+    _attach_report_logo(report_data)
+
     out_path = os.path.join(output_dir, "report.json")
     tmp_path = out_path + ".tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:
@@ -425,20 +491,17 @@ def generate_sgnipt_report_pdf(
     candidates: List[str] = []
     if template_dir:
         candidates.append(template_dir)
-    # Bundled templates: <repo_root>/data/report_templates
-    _self_dir = os.path.dirname(os.path.abspath(__file__))
-    for _up in range(5):
-        candidate = os.path.join(_self_dir, *[".."] * _up, "data", "report_templates")
-        candidate = os.path.normpath(candidate)
-        if os.path.isdir(candidate) and os.path.isfile(os.path.join(candidate, "sgnipt_EN.html")):
-            candidates.append(candidate)
-            break
+    resolved_template_dir = _resolve_sgnipt_template_dir(template_dir)
+    if resolved_template_dir:
+        candidates.append(resolved_template_dir)
 
-    resolved_template_dir: Optional[str] = None
+    resolved_template_dir = None
     for c in candidates:
         if os.path.isdir(c):
             resolved_template_dir = c
             break
+
+    _attach_report_logo(report_data, resolved_template_dir)
 
     try:
         from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -470,6 +533,7 @@ def generate_sgnipt_report_pdf(
                     env.filters["safe"] = lambda x: x  # allow |safe in template
                     tpl = env.get_template(tpl_name)
                     tpl_html = tpl.render(data=report_data)
+                    tpl_html = _inline_logo_in_html(tpl_html, resolved_template_dir)
                 except Exception as e:
                     logger.error("[sgnipt_report] Jinja2 render failed for %s: %s", tpl_path, e)
 
@@ -512,15 +576,12 @@ def render_sgnipt_preview_html(
     resolved_template_dir: Optional[str] = template_dir
 
     if not resolved_template_dir:
-        _self_dir = os.path.dirname(os.path.abspath(__file__))
-        for _up in range(5):
-            candidate = os.path.normpath(os.path.join(_self_dir, *[".."] * _up, "data", "report_templates"))
-            if os.path.isdir(candidate) and os.path.isfile(os.path.join(candidate, tpl_name)):
-                resolved_template_dir = candidate
-                break
+        resolved_template_dir = _resolve_sgnipt_template_dir()
 
     if not resolved_template_dir or not os.path.isfile(os.path.join(resolved_template_dir, tpl_name)):
         raise FileNotFoundError(f"sgNIPT template not found: {tpl_name} (searched: {resolved_template_dir})")
+
+    _attach_report_logo(report_data, resolved_template_dir)
 
     from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -529,4 +590,5 @@ def render_sgnipt_preview_html(
         autoescape=select_autoescape(["html"]),
     )
     tpl = env.get_template(tpl_name)
-    return tpl.render(data=report_data)
+    html = tpl.render(data=report_data)
+    return _inline_logo_in_html(html, resolved_template_dir)

@@ -161,6 +161,24 @@ class Settings(BaseSettings):
     gemini_api_key: str = Field(default="")
     gemini_api_key_env_file: Optional[str] = Field(default=None)
     acmg_ai_api_key: str = Field(default="")
+    # Ollama / OpenAI-compatible local LLM
+    ollama_base_url: str = Field(
+        default="http://host.docker.internal:11434/v1",
+        description="OpenAI-compatible base URL for Ollama (container→host)",
+    )
+    ollama_model: str = Field(
+        default="qwen2.5:32b",
+        description="Default Ollama model name",
+    )
+    # Gene knowledge AI provider (overrides gemini when set to 'ollama')
+    gene_knowledge_ai_provider: str = Field(
+        default="gemini",
+        description="AI provider for gene knowledge fetch: 'gemini' or 'ollama'",
+    )
+    gene_knowledge_ai_model: Optional[str] = Field(
+        default=None,
+        description="Model override for gene knowledge AI (falls back to gemini/ollama default)",
+    )
 
     # ─── Literature Search ─────────────────────────────────
     literature_enabled: bool = Field(default=True)

@@ -2317,9 +2317,10 @@ class CarrierScreeningPlugin(ServicePlugin):
         patient_info: Optional[Dict] = None,
         partner_info: Optional[Dict] = None,
         languages: Optional[List[str]] = None,
-    ) -> bool:
-        """WeasyPrint 등 동기 작업 — asyncio.to_thread 에서 실행."""
+    ) -> List[str]:
+        """WeasyPrint 등 동기 작업 — asyncio.to_thread 에서 실행. 생성된 파일 경로 목록 반환."""
         try:
+            import glob
             from .report import (
                 CARRIER_PDF_SOLO_KINDS,
                 generate_report_json,
@@ -2441,11 +2442,17 @@ class CarrierScreeningPlugin(ServicePlugin):
                     f"denied writing under {output_dir}. See service-daemon logs for the first error above."
                 )
 
+            generated: List[str] = [report_json_path]
+            generated.extend(pdf_paths)
+            for html_path in glob.glob(os.path.join(output_dir, "Report_*.html")):
+                if html_path not in generated:
+                    generated.append(html_path)
+
             logger.info(
                 f"[generate_report] Complete: {output_dir} "
                 f"({len(pdf_paths)} PDF files generated)"
             )
-            return True
+            return generated
 
         except Exception as e:
             logger.error(f"Report generation failed: {e}", exc_info=True)
@@ -2459,7 +2466,7 @@ class CarrierScreeningPlugin(ServicePlugin):
         patient_info: Optional[Dict] = None,
         partner_info: Optional[Dict] = None,
         languages: Optional[List[str]] = None,
-    ) -> bool:
+    ) -> List[str]:
         """
         리뷰어 확정 후 최종 리포트를 생성합니다.
         service-daemon의 /order/{order_id}/report 엔드포인트에서 호출됩니다.

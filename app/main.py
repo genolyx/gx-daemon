@@ -793,6 +793,7 @@ def _compute_order_gene_knowledge(
         ensure_gene_knowledge_full_text, init_gene_knowledge_database,
         load_variant_knowledge_for_keys, make_variant_key,
         read_gene_knowledge_full_row, refresh_gene_knowledge_from_gemini,
+        refresh_gene_knowledge,
     )
     db_path = (settings.gene_knowledge_db or "").strip()
     if not db_path:
@@ -826,6 +827,13 @@ def _compute_order_gene_knowledge(
     model = getattr(settings, "gene_knowledge_gemini_model", "gemini-2.5-flash")
     allow_gemini = bool(enrich and gemini_key)
 
+    # Runtime AI config overrides
+    ai_cfg = _get_ai_cfg()
+    ai_provider = ai_cfg["provider"]
+    ai_ollama_base_url = ai_cfg["ollama_base_url"]
+    ai_ollama_model = ai_cfg["ollama_model"]
+    allow_ollama = bool(ai_provider == "ollama" and (enrich or force_refresh))
+
     gene_set = set(genes)
     variant_keys_set: set = set()
     all_variants = (
@@ -843,15 +851,24 @@ def _compute_order_gene_knowledge(
             variant_keys_set.add(make_variant_key(g, str(v.get("hgvsc") or ""), str(v.get("hgvsp") or "")))
     variants_out = load_variant_knowledge_for_keys(db_path, list(variant_keys_set))
 
-    if force_refresh and not gemini_key:
+    if force_refresh and not gemini_key and ai_provider == "gemini":
         return {"gene_knowledge_db_configured": True, "genes": {}, "variants": variants_out,
                 "error": "GEMINI_API_KEY not configured", "enrich_requested": enrich,
-                "force_refresh": True, "gemini_available": False}
+                "force_refresh": True, "gemini_available": False, "ai_provider": ai_provider}
 
     out: Dict[str, Any] = {}
     gemini_fetch_error: Optional[str] = None
     for gene in genes:
-        if force_refresh and gemini_key:
+        if ai_provider == "ollama" and (force_refresh or allow_ollama):
+            row, gerr = refresh_gene_knowledge(
+                gene, db_path,
+                provider="ollama",
+                model=ai_ollama_model,
+                ollama_base_url=ai_ollama_base_url,
+            )
+            if gerr:
+                gemini_fetch_error = gerr
+        elif force_refresh and gemini_key:
             row, gerr = refresh_gene_knowledge_from_gemini(gene, db_path, gemini_key, model=model)
             if gerr:
                 gemini_fetch_error = gerr
@@ -863,7 +880,8 @@ def _compute_order_gene_knowledge(
 
     ret: Dict[str, Any] = {
         "gene_knowledge_db_configured": True, "genes": out, "variants": variants_out,
-        "enrich_requested": enrich, "force_refresh": force_refresh, "gemini_available": bool(gemini_key),
+        "enrich_requested": enrich, "force_refresh": force_refresh,
+        "gemini_available": bool(gemini_key), "ai_provider": ai_provider,
     }
     if force_refresh and gemini_fetch_error:
         ret["gemini_fetch_error"] = gemini_fetch_error
@@ -962,6 +980,51 @@ async def lifespan(app: FastAPI):
     logger.info("GX-Daemon stopped")
 
 
+# ── Runtime-overridable AI config ─────────────────────────────────────────────
+# Starts from settings values; can be patched at runtime via PATCH /ai/config
+_AI_CFG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "logs", "ai_config.json")
+_runtime_ai: Dict[str, Any] = {}
+
+
+def _load_ai_cfg_file() -> None:
+    """Load persisted AI config from file into _runtime_ai on startup."""
+    try:
+        p = os.path.abspath(_AI_CFG_FILE)
+        if os.path.isfile(p):
+            with open(p, "r") as f:
+                saved = json.load(f)
+            _runtime_ai.update(saved)
+            logger.info("Loaded AI config from %s: %s", p, saved)
+    except Exception as e:
+        logger.warning("Could not load AI config file: %s", e)
+
+
+def _save_ai_cfg_file() -> None:
+    """Persist current _runtime_ai to file."""
+    try:
+        p = os.path.abspath(_AI_CFG_FILE)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w") as f:
+            json.dump(dict(_runtime_ai), f, indent=2)
+    except Exception as e:
+        logger.warning("Could not save AI config file: %s", e)
+
+
+def _get_ai_cfg() -> Dict[str, Any]:
+    """Return effective AI config (runtime overrides take priority)."""
+    return {
+        "provider": _runtime_ai.get("provider", settings.gene_knowledge_ai_provider or "gemini"),
+        "model": _runtime_ai.get("model", None),
+        "ollama_base_url": _runtime_ai.get("ollama_base_url", settings.ollama_base_url),
+        "ollama_model": _runtime_ai.get("ollama_model", settings.ollama_model),
+        "gemini_api_key": (settings.gemini_api_key or "").strip(),
+        "gene_knowledge_gemini_model": settings.gene_knowledge_gemini_model,
+    }
+
+
+# Load persisted AI config on module import
+_load_ai_cfg_file()
+
 app = FastAPI(
     title="GX-Daemon",
     description="Headless genomics analysis daemon (Carrier Screening + Platform integration)",
@@ -1040,6 +1103,113 @@ async def health():
         "available_slots": qm.available_slots,
         "registered_services": list_service_codes(),
     }
+
+
+# ── AI Provider Configuration ──────────────────────────────────────────────────
+
+@app.get("/ai/config")
+async def get_ai_config():
+    """Return current effective AI provider settings."""
+    cfg = _get_ai_cfg()
+    return {
+        "provider": cfg["provider"],
+        "gemini": {
+            "available": bool(cfg["gemini_api_key"]),
+            "model": cfg["gene_knowledge_gemini_model"],
+        },
+        "ollama": {
+            "base_url": cfg["ollama_base_url"],
+            "model": cfg["ollama_model"],
+        },
+        "runtime_overrides": dict(_runtime_ai),
+    }
+
+
+@app.patch("/ai/config")
+async def patch_ai_config(request: Request):
+    """
+    Update runtime AI provider settings (no daemon restart needed).
+    Body: { "provider": "gemini"|"ollama", "ollama_base_url": "...", "ollama_model": "..." }
+    """
+    body = await request.json()
+    if "provider" in body:
+        v = str(body["provider"]).lower().strip()
+        if v not in ("gemini", "ollama"):
+            raise HTTPException(status_code=400, detail="provider must be 'gemini' or 'ollama'")
+        _runtime_ai["provider"] = v
+    if "ollama_base_url" in body:
+        _runtime_ai["ollama_base_url"] = str(body["ollama_base_url"]).rstrip("/")
+    if "ollama_model" in body:
+        _runtime_ai["ollama_model"] = str(body["ollama_model"])
+    logger.info("AI config updated: %s", _runtime_ai)
+    _save_ai_cfg_file()
+    return {"ok": True, "runtime_overrides": dict(_runtime_ai)}
+
+
+@app.get("/ai/ollama/models")
+async def get_ollama_models():
+    """
+    Proxy Ollama tags API to list available local models.
+    Uses ollama_base_url from runtime config (strips /v1 suffix).
+    """
+    import httpx
+    cfg = _get_ai_cfg()
+    base = cfg["ollama_base_url"].rstrip("/")
+    # Derive Ollama native API root (remove /v1 suffix if present)
+    if base.endswith("/v1"):
+        ollama_root = base[:-3]
+    else:
+        ollama_root = base
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{ollama_root}/api/tags")
+            resp.raise_for_status()
+            data = resp.json()
+            models = [m["name"] for m in (data.get("models") or [])]
+            return {"models": models, "ollama_base": ollama_root}
+    except Exception as e:
+        logger.warning("Ollama model list failed: %s", e)
+        return {"models": [], "error": str(e), "ollama_base": ollama_root}
+
+
+@app.post("/ai/ollama/pull")
+async def pull_ollama_model(request: Request):
+    """
+    Stream Ollama model pull progress as NDJSON (one JSON line per progress event).
+    Body: { "model": "qwen2.5:32b" }
+    """
+    import httpx
+    from fastapi.responses import StreamingResponse as _StreamingResponse
+
+    body = await request.json()
+    model_name = (body.get("model") or "").strip()
+    if not model_name:
+        raise HTTPException(status_code=400, detail="model name required")
+
+    cfg = _get_ai_cfg()
+    base = cfg["ollama_base_url"].rstrip("/")
+    ollama_root = base[:-3] if base.endswith("/v1") else base
+
+    async def _stream():
+        try:
+            async with httpx.AsyncClient(timeout=None) as client:
+                async with client.stream(
+                    "POST",
+                    f"{ollama_root}/api/pull",
+                    json={"name": model_name},
+                    timeout=None,
+                ) as resp:
+                    async for line in resp.aiter_lines():
+                        if line:
+                            yield line + "\n"
+        except Exception as e:
+            yield json.dumps({"error": str(e)}) + "\n"
+
+    return _StreamingResponse(
+        _stream(),
+        media_type="application/x-ndjson",
+        headers={"X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/daemon-log")
@@ -1545,6 +1715,29 @@ async def classify_variants_endpoint(order_id: str, request: Request):
     except Exception as e:
         logger.error("classify-variants failed for %s: %s", order_id, e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/report-assets/genolyx_logo.png")
+async def report_genolyx_logo():
+    """Genolyx logo for sgNIPT report HTML preview (same asset as NIPT GX_Report_html)."""
+    from .services.sgnipt_report import (
+        SGNIPT_LOGO_FILENAME,
+        _resolve_sgnipt_template_dir,
+    )
+
+    template_dir = _resolve_sgnipt_template_dir()
+    if template_dir:
+        path = os.path.join(template_dir, SGNIPT_LOGO_FILENAME)
+        if os.path.isfile(path):
+            return FileResponse(path, media_type="image/png")
+    # Fallback: NIPT template tree (dev host path)
+    for fallback in (
+        "/home/sam/GX_Report_html/genolyx_logo.png",
+        "/home/ken/gx-daemon/data/report_templates/genolyx_logo.png",
+    ):
+        if os.path.isfile(fallback):
+            return FileResponse(fallback, media_type="image/png")
+    raise HTTPException(status_code=404, detail="Genolyx logo not found")
 
 
 @app.post("/order/{order_id}/report/preview")

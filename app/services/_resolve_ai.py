@@ -52,11 +52,15 @@ async def call_ai_json(
     user_content: str,
     temperature: float = 0.1,
     max_tokens: int = 1000,
+    base_url: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """
-    JSON 응답을 반환하는 AI 호출 (Gemini / OpenAI).
+    JSON 응답을 반환하는 AI 호출 (Gemini / OpenAI / Ollama).
     Rate limit (429) 시 exponential backoff + jitter로 자동 재시도합니다.
 
+    Args:
+        base_url: Ollama/OpenAI-compatible endpoint (e.g. "http://localhost:11434/v1").
+                  Required for provider="ollama"; ignored for provider="gemini".
     Returns:
         파싱된 JSON dict, 실패 시 None
     """
@@ -66,8 +70,12 @@ async def call_ai_json(
         call_fn = _call_gemini
     elif provider == "openai":
         call_fn = _call_openai
+    elif provider == "ollama":
+        _base = (base_url or "http://host.docker.internal:11434/v1").rstrip("/")
+        async def call_fn(m, k, sp, uc, temp, mt):
+            return await _call_openai_compat(m, k or "ollama", sp, uc, temp, mt, base_url=_base)
     else:
-        logger.error(f"Unknown AI provider: {provider}. Use 'gemini' or 'openai'.")
+        logger.error(f"Unknown AI provider: {provider}. Use 'gemini', 'openai', or 'ollama'.")
         return None
 
     last_exc: Optional[Exception] = None
@@ -185,6 +193,44 @@ async def _call_openai(
             response_format={"type": "json_object"},
         )
         content = response.choices[0].message.content
+        return json.loads(content)
+
+    except Exception as e:
+        _classify_and_raise(e)
+
+
+# ──────────────────────────────────────────────────────────────
+# OpenAI-compatible (Ollama, vLLM, LM Studio, …)
+# ──────────────────────────────────────────────────────────────
+
+async def _call_openai_compat(
+    model: str,
+    api_key: str,
+    system_prompt: str,
+    user_content: str,
+    temperature: float,
+    max_tokens: int,
+    base_url: str = "http://host.docker.internal:11434/v1",
+) -> Optional[Dict[str, Any]]:
+    """OpenAI SDK with custom base_url — works for Ollama, vLLM, LM Studio, etc."""
+    try:
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(api_key=api_key or "ollama", base_url=base_url)
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format={"type": "json_object"},
+        )
+        content = response.choices[0].message.content or ""
+        if content.startswith("```"):
+            lines = content.splitlines()
+            content = "\n".join(l for l in lines if not l.startswith("```")).strip()
         return json.loads(content)
 
     except Exception as e:

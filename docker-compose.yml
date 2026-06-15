@@ -12,6 +12,9 @@ services:
     container_name: ${APP_ENV}-gx-daemon
     restart: unless-stopped
 
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
     env_file:
       - ${ENV_FILE:-.env}
 

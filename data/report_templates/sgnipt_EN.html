@@ -17,10 +17,19 @@
         }
         @page :first { @top-right { content: none; } }
 
+        :root {
+            --brand-primary: #0f172a;
+            --accent-blue: #06b6d4;
+            --border-color: #e2e8f0;
+            --bg-summary: #f8fafc;
+            --text-main: #334155;
+            --text-muted: #64748b;
+        }
+
         body {
             font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
             line-height: 1.3;
-            color: #334155;
+            color: var(--text-main);
             margin: 0;
         }
         #header-content {
@@ -40,9 +49,9 @@
         }
         .new-page { page-break-before: always; }
 
-        /* Branding */
+        /* Branding — slate header line; typography matches carrier reports */
         .brand-header {
-            border-bottom: 1.5px solid #7c3aed;
+            border-bottom: 1.5px solid var(--brand-primary);
             padding-bottom: 8px;
             margin-bottom: 25px;
             display: block;
@@ -54,7 +63,7 @@
             float: left;
             font-size: 18pt;
             font-weight: 500;
-            color: #0f172a;
+            color: var(--brand-primary);
             letter-spacing: -0.01em;
             white-space: nowrap;
             line-height: 40px;
@@ -62,28 +71,25 @@
         .brand-subtitle {
             float: left;
             font-size: 9pt;
-            color: #7c3aed;
+            color: var(--accent-blue);
             margin-left: 12px;
             line-height: 42px;
-            font-weight: 400;
+            font-weight: 500;
         }
-        .logo-placeholder {
+        .brand-logo {
             float: right;
-            width: 140px;
-            height: 40px;
-            border: 1px dashed #cbd5e1;
-            text-align: center;
             line-height: 40px;
-            font-size: 6.5pt;
-            color: #94a3b8;
-            text-transform: uppercase;
+        }
+        .brand-logo img {
+            height: 40px;
+            vertical-align: middle;
         }
 
         /* Patient Info Table */
         .info-table {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 28px;
+            margin-bottom: 35px;
             table-layout: fixed;
             clear: both;
         }
@@ -93,59 +99,54 @@
             border-bottom: 1px solid #f1f5f9;
             font-size: 7.5pt;
         }
-        .label { display: inline; font-size: 7.5pt; color: #64748b; text-transform: uppercase; font-weight: 500; margin-right: 4px; }
+        .label { display: inline; font-size: 7.5pt; color: var(--text-muted); text-transform: uppercase; font-weight: 500; margin-right: 4px; }
         .value { display: inline; color: #1e293b; }
-        .value-bold { display: inline; font-weight: 600; color: #0f172a; }
+        .value-bold { display: inline; font-weight: 500; color: var(--brand-primary); }
 
-        /* Fetal Info Bar */
-        .fetal-bar {
-            background: #f5f3ff;
-            border: 1px solid #c4b5fd;
-            border-radius: 6px;
-            padding: 10px 14px;
-            margin-bottom: 20px;
-            display: flex;
-            gap: 24px;
-            flex-wrap: wrap;
-        }
-        .fetal-item { display: inline-block; }
-        .fetal-label { font-size: 7pt; color: #7c3aed; text-transform: uppercase; font-weight: 600; display: block; margin-bottom: 2px; }
-        .fetal-value { font-size: 9.5pt; font-weight: 600; color: #1e293b; }
-        .fetal-value.na { color: #94a3b8; font-style: italic; }
-        .fetal-value.pass { color: #15803d; }
-        .fetal-value.warn { color: #b45309; }
-        .fetal-value.fail { color: #be123c; }
-
-        /* Status Banner */
+        /* Combined result banner (status + fetal fraction) */
         .banner {
             padding: 12px 15px;
             border-radius: 4px;
             margin-top: 10px;
-            margin-bottom: 28px;
+            margin-bottom: 40px;
         }
         .banner-pos { background-color: #fff1f2; color: #be123c; border: 1px solid #be123c; }
         .banner-neg { background-color: #f0fdf4; color: #15803d; border: 1px solid #15803d; }
         .banner-nocall { background-color: #fefce8; color: #854d0e; border: 1px solid #ca8a04; }
-        .status-text { font-size: 12pt; font-weight: 600; margin: 0 0 4px 0; }
-        .banner-desc { margin: 0; font-size: 8.5pt; color: #334155; }
-        .flag-pill {
-            display: inline-block;
-            background: #fef9c3;
-            color: #713f12;
-            border: 1px solid #fde68a;
-            border-radius: 4px;
-            font-size: 7pt;
-            padding: 1px 6px;
-            margin-right: 4px;
-            margin-top: 4px;
-            font-weight: 500;
+        .banner-layout {
+            width: 100%;
+            border-collapse: collapse;
+            border: none;
         }
+        .banner-layout td {
+            border: none;
+            padding: 0;
+            vertical-align: top;
+        }
+        .banner-result-cell { width: 72%; padding-right: 12px; }
+        .banner-ff-cell { width: 28%; text-align: right; white-space: nowrap; }
+        .banner-desc-cell { padding-top: 8px; }
+        .banner-ff-label {
+            font-size: 7pt;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            font-weight: 500;
+            display: block;
+            margin-bottom: 2px;
+        }
+        .banner-ff-value { font-size: 11pt; font-weight: 500; color: #1e293b; }
+        .banner-ff-value.na { color: #94a3b8; font-style: italic; font-weight: 500; }
+        .banner-ff-value.pass { color: #15803d; }
+        .banner-ff-value.warn { color: #b45309; }
+        .banner-ff-value.fail { color: #be123c; }
+        .status-text { font-size: 12pt; font-weight: 500; margin: 0; }
+        .banner-desc { margin: 4px 0 0 0; font-size: 8.5pt; color: #334155; }
 
         /* Summary Table */
         .summary-table {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 20px;
+            margin-bottom: 25px;
         }
         .summary-table th {
             text-align: left;
@@ -163,9 +164,9 @@
             vertical-align: top;
         }
 
-        /* Section Headings */
+        /* Section headings — match carrier (plain underline, no color bar) */
         .section-title {
-            margin-top: 28px;
+            margin-top: 25px;
             font-size: 11pt;
             font-weight: 500;
             color: #0f172a;
@@ -174,20 +175,19 @@
             text-transform: uppercase;
         }
 
-        /* Variant Card */
         .condition-heading {
             font-size: 11pt;
             font-weight: 500;
             color: #0f172a;
             margin-bottom: 15px;
             padding: 4px 0 4px 12px;
-            border-left: 6px solid #7c3aed;
+            border-left: 6px solid #be123c;
             line-height: 1.2;
             background-color: #f8fafc;
             display: block;
         }
         .detail-item {
-            margin-top: 22px;
+            margin-top: 25px;
             padding: 10px 0;
             page-break-inside: avoid;
             border-bottom: 1px dashed #e2e8f0;
@@ -203,9 +203,9 @@
         .detail-text {
             font-size: 8pt;
             color: #334155;
-            margin: 3px 0 0 0;
+            margin: 2px 0 0 0;
             text-align: justify;
-            line-height: 1.4;
+            line-height: 1.3;
         }
 
         /* Origin badge */
@@ -289,11 +289,11 @@
         .clinical-statement {
             font-size: 8pt;
             color: #64748b;
-            line-height: 1.5;
+            line-height: 1.4;
             text-align: justify;
             margin-bottom: 20px;
-            background: #f8fafc;
-            padding: 10px 12px;
+            background: var(--bg-summary);
+            padding: 10px;
             border-radius: 4px;
         }
 
@@ -320,7 +320,7 @@
 <div class="brand-header">
     <div class="brand-name">Single Gene NIPT</div>
     <div class="brand-subtitle">Non-Invasive Prenatal Testing</div>
-    <div class="logo-placeholder"><span>Logo Placeholder</span></div>
+    <div class="brand-logo"><img src="genolyx_logo.png" alt="Genolyx"></div>
 </div>
 
 <table class="info-table">
@@ -346,134 +346,112 @@
     </tr>
 </table>
 
-<!-- Fetal Info Bar -->
-<div class="fetal-bar">
-    <div class="fetal-item">
-        <span class="fetal-label">Fetal Fraction</span>
-        {% if data.fetal_info.fraction is not none %}
-            {% set ff_pct = (data.fetal_info.fraction * 100) | round(1) %}
-            {% if data.fetal_info.fraction_status == 'FAILED' %}
-                <span class="fetal-value fail">N/A <small style="font-size:7pt;font-weight:400;">(estimation failed)</small></span>
-            {% elif ff_pct < 4 %}
-                <span class="fetal-value warn">{{ ff_pct }}% <small style="font-size:7pt;font-weight:400;">(low)</small></span>
-            {% else %}
-                <span class="fetal-value pass">{{ ff_pct }}%</span>
-            {% endif %}
-        {% else %}
-            <span class="fetal-value na">N/A</span>
-        {% endif %}
-    </div>
-    <div class="fetal-item">
-        <span class="fetal-label">Fetal Sex</span>
-        {% if data.fetal_info.gender and data.fetal_info.gender != 'Unknown' %}
-            <span class="fetal-value">{{ data.fetal_info.gender }}</span>
-        {% else %}
-            <span class="fetal-value na">Not determined</span>
-        {% endif %}
-    </div>
-    <div class="fetal-item">
-        <span class="fetal-label">FF Method</span>
-        <span class="fetal-value" style="font-size:8.5pt;font-weight:400;">{{ data.fetal_info.method or '—' }}</span>
-    </div>
-    {% if data.fetal_info.num_informative_snps %}
-    <div class="fetal-item">
-        <span class="fetal-label">Informative SNPs</span>
-        <span class="fetal-value" style="font-size:8.5pt;font-weight:400;">{{ data.fetal_info.num_informative_snps }}</span>
-    </div>
-    {% endif %}
-</div>
-
-<!-- Overall Status Banner -->
+<!-- Combined result banner -->
 {% set status = data.overall_status | upper %}
 {% if status == 'POSITIVE' %}
 <div class="banner banner-pos">
-    <p class="status-text">+ POSITIVE — Pathogenic Fetal Variant(s) Detected</p>
-    <p class="banner-desc">One or more pathogenic or likely pathogenic variants have been detected in the fetal DNA. Please refer to the Detailed Interpretations section for clinical significance.</p>
 {% elif status == 'NEGATIVE' %}
 <div class="banner banner-neg">
-    <p class="status-text">– NEGATIVE — No Pathogenic Fetal Variants Detected</p>
-    <p class="banner-desc">No pathogenic or likely pathogenic variants were identified in the target gene(s) evaluated in this assay.</p>
 {% else %}
 <div class="banner banner-nocall">
-    <p class="status-text">⚠ NO CALL — Result Inconclusive</p>
-    <p class="banner-desc">A definitive result could not be obtained. Please refer to the status flags and QC metrics for details.</p>
 {% endif %}
-{% if data.status_flags %}
-<div style="margin-top:6px;">
-    {% for flag in data.status_flags %}
-    <span class="flag-pill">{{ flag }}</span>
-    {% endfor %}
-</div>
-{% endif %}
+    <table class="banner-layout">
+        <tr>
+            <td class="banner-result-cell">
+                {% if status == 'POSITIVE' %}
+                <p class="status-text">+ POSITIVE — Pathogenic Fetal Variant(s) Detected</p>
+                {% elif status == 'NEGATIVE' %}
+                <p class="status-text">– NEGATIVE — No Pathogenic Fetal Variants Detected</p>
+                {% else %}
+                <p class="status-text">⚠ NO CALL — Result Inconclusive</p>
+                {% endif %}
+            </td>
+            <td class="banner-ff-cell">
+                <span class="banner-ff-label">Fetal Fraction</span>
+                {% if data.fetal_info.fraction is not none %}
+                    {% set ff_pct = (data.fetal_info.fraction * 100) | round(1) %}
+                    {% if data.fetal_info.fraction_status == 'FAILED' %}
+                        <span class="banner-ff-value fail">N/A <small style="font-size:7pt;font-weight:400;">(estimation failed)</small></span>
+                    {% elif ff_pct < 4 %}
+                        <span class="banner-ff-value warn">{{ ff_pct }}% <small style="font-size:7pt;font-weight:400;">(low)</small></span>
+                    {% else %}
+                        <span class="banner-ff-value pass">{{ ff_pct }}%</span>
+                    {% endif %}
+                {% else %}
+                    <span class="banner-ff-value na">N/A</span>
+                {% endif %}
+            </td>
+        </tr>
+        <tr>
+            <td class="banner-desc-cell" colspan="2">
+                {% if status == 'POSITIVE' %}
+                <p class="banner-desc">One or more pathogenic or likely pathogenic variants have been detected in the fetal DNA. Please refer to the Detailed Interpretations section for clinical significance.</p>
+                {% elif status == 'NEGATIVE' %}
+                <p class="banner-desc">No pathogenic or likely pathogenic variants were identified in the target gene(s) evaluated in this assay.</p>
+                {% else %}
+                <p class="banner-desc">A definitive result could not be obtained. Please refer to the status flags and QC metrics for details.</p>
+                {% endif %}
+            </td>
+        </tr>
+    </table>
 </div>
 
 <!-- Confirmed Variant Summary Table -->
 <table class="summary-table">
     <thead>
         <tr>
-            <th width="12%">GENE</th>
-            <th width="20%">VARIANT</th>
-            <th width="14%">GENOMIC</th>
-            <th width="9%">VAF</th>
-            <th width="12%">FETAL GENOTYPE</th>
-            <th width="16%">ACMG CLASS.</th>
-            <th width="9%">CLINVAR</th>
-            <th width="8%">DISEASE</th>
+            <th width="22%">CONDITION</th>
+            <th width="10%">GENE</th>
+            <th width="28%">VARIANT</th>
+            <th width="8%">VAF</th>
+            <th width="12%">GENOTYPE</th>
+            <th width="20%">CLASSIFICATION</th>
         </tr>
     </thead>
     <tbody>
         {% if data.confirmed_variants and data.confirmed_variants | length > 0 %}
             {% for v in data.confirmed_variants %}
-            {% set cls = (v.acmg_classification or v.classification or '') | lower %}
+            {% set cls = (v.acmg_classification or v.classification or v.clinvar_sig_primary or '') | lower %}
             <tr>
-                <td><strong>{{ v.gene or '—' }}</strong></td>
-                <td style="font-family:monospace;font-size:7.5pt;">
-                    {% if v.hgvsc %}<div>{{ v.hgvsc }}</div>{% endif %}
-                    {% if v.hgvsp %}<div style="color:#64748b;">{{ v.hgvsp }}</div>{% endif %}
-                    {% if not v.hgvsc and not v.hgvsp %}{{ v.chrom }}:{{ v.pos }} {{ v.ref }}>{{ v.alt }}{% endif %}
+                <td>
+                    <span style="font-weight:500;">{{ v.disease or v.disorder or '—' }}</span>
+                    {% if v.inheritance %}
+                    <br><span style="color:#64748b; font-size:7pt;">{{ v.inheritance }}</span>
+                    {% endif %}
                 </td>
-                <td style="font-size:7.5pt;color:#64748b;">{{ v.chrom }}:{{ v.pos }}</td>
-                <td style="font-size:7.5pt;text-align:center;">
+                <td><span style="font-weight:500;">{{ v.gene or '—' }}</span></td>
+                <td>
+                    <span style="font-weight:500;">
+                        {% if v.hgvsc %}{{ v.hgvsc }}
+                        {% elif v.hgvsp %}{{ v.hgvsp }}
+                        {% else %}{{ v.chrom }}:{{ v.pos }} {{ v.ref }}>{{ v.alt }}{% endif %}
+                    </span>
+                    {% if v.hgvsc and v.hgvsp %}
+                    <br><span style="color:#64748b; font-size:7pt;">{{ v.hgvsp }}</span>
+                    {% endif %}
+                </td>
+                <td>
                     {% if v.vaf is not none and v.vaf != '' %}
                         {{ (v.vaf * 100) | round(1) }}%
                     {% else %}—{% endif %}
                 </td>
-                <td style="font-size:7.5pt;">{{ v.fetal_genotype or '—' }}</td>
+                <td>{{ v.fetal_genotype or '—' }}</td>
                 <td>
                     {% if 'pathogenic' in cls and 'likely' not in cls %}
-                        <span style="color:#be123c;font-weight:600;">{{ v.acmg_classification or v.classification }}</span>
+                        <span style="color:#be123c; font-weight:500;">{{ v.acmg_classification or v.classification or v.clinvar_sig_primary }}</span>
                     {% elif 'likely pathogenic' in cls %}
-                        <span style="color:#c2410c;font-weight:600;">{{ v.acmg_classification or v.classification }}</span>
+                        <span style="color:#c2410c; font-weight:500;">{{ v.acmg_classification or v.classification or v.clinvar_sig_primary }}</span>
                     {% elif 'vus' in cls or 'uncertain' in cls %}
-                        <span style="color:#b45309;font-weight:500;">{{ v.acmg_classification or v.classification }}</span>
-                    {% elif v.acmg_classification or v.classification %}
-                        <span>{{ v.acmg_classification or v.classification }}</span>
-                    {% else %}—{% endif %}
-                    {% if v.acmg_criteria %}
-                        <div style="font-size:6.5pt;color:#64748b;margin-top:2px;">{{ v.acmg_criteria | join(', ') }}</div>
-                    {% endif %}
-                </td>
-                <td style="font-size:7pt;">
-                    {% if v.clinvar_sig_primary %}
-                        {% set cv = v.clinvar_sig_primary | lower %}
-                        {% if 'pathogenic' in cv and 'likely' not in cv %}
-                            <span style="color:#be123c;font-weight:600;">{{ v.clinvar_sig_primary }}</span>
-                        {% elif 'likely pathogenic' in cv %}
-                            <span style="color:#c2410c;font-weight:600;">{{ v.clinvar_sig_primary }}</span>
-                        {% else %}
-                            <span>{{ v.clinvar_sig_primary }}</span>
-                        {% endif %}
-                        {% if v.clinvar_stars and v.clinvar_stars > 0 %}
-                            <div style="font-size:6pt;color:#64748b;">{{ '★' * v.clinvar_stars }}</div>
-                        {% endif %}
+                        <span style="color:#b45309; font-weight:500;">{{ v.acmg_classification or v.classification or v.clinvar_sig_primary }}</span>
+                    {% elif v.acmg_classification or v.classification or v.clinvar_sig_primary %}
+                        <span style="font-weight:500;">{{ v.acmg_classification or v.classification or v.clinvar_sig_primary }}</span>
                     {% else %}—{% endif %}
                 </td>
-                <td style="font-size:7.5pt;">{{ v.disease or v.disorder or '—' }}</td>
             </tr>
             {% endfor %}
         {% else %}
             <tr>
-                <td colspan="8" style="text-align:center;padding:30px;color:#64748b;font-style:italic;">
+                <td colspan="6" style="text-align:center;padding:30px;color:#64748b;font-style:italic;">
                     No pathogenic or likely pathogenic variants identified in the target gene(s) evaluated.
                 </td>
             </tr>
@@ -495,10 +473,10 @@
 </div>
 
 
-<!-- Page 2: Detailed Variant Interpretations -->
+<!-- Page 2: Detailed Interpretations -->
 {% if data.confirmed_variants and data.confirmed_variants | length > 0 %}
 <div class="new-page">
-    <div class="section-title">Detailed Variant Interpretations</div>
+    <div class="section-title">Detailed Interpretations</div>
 
     {% for v in data.confirmed_variants %}
     <div class="detail-item">
@@ -666,8 +644,7 @@
     <div class="section-title">Genes Evaluated</div>
     <p class="detail-text" style="margin-bottom:10px;font-size:8.5pt;">
         This report reflects variant analysis of
-        <strong>{{ data.genes_evaluated | length if data.genes_evaluated else '—' }}</strong>
-        gene(s) targeted by the <strong>{{ data.panel or 'ordered panel' }}</strong>.
+        <strong>{{ data.genes_evaluated | length if data.genes_evaluated else '—' }}</strong> genes.
     </p>
     {% if data.genes_evaluated and data.genes_evaluated | length > 0 %}
     <div class="gene-list-grid">{{ data.genes_evaluated | join(', ') }}</div>
