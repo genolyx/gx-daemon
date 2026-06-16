@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Genolyx NIPS - Clinical Report</title>
+    <style>
+        /* =========================================
+           EDITABLE THEME VARIABLES
+           ========================================= */
+        :root {
+            /* Slate 50-900 / Blue 600 Palette per Design System */
+            --brand-primary: #0f172a;
+            /* Slate 900 */
+            --accent-blue: #06b6d4;
+            /* Cyan-500: Matches Genolyx Logo X */
+            /* Blue 600 */
+            --border-color: #e2e8f0;
+            /* Slate 200 */
+            --bg-summary: #f8fafc;
+            /* Slate 50 */
+            --text-main: #334155;
+            /* Slate 700 */
+            --text-muted: #64748b;
+            /* Slate 500 */
+            --font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        }
+
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+
+        body {
+            font-family: var(--font-family);
+            color: var(--text-main);
+            line-height: 1.4;
+            padding: 20px;
+            background: #e2e8f0;
+            margin: 0;
+        }
+
+        .report-page {
+            width: 210mm;
+            min-height: 297mm;
+            /* Standard A4 height */
+            margin: 0 auto 40px auto;
+            /* Centered with bottom gap for screen */
+            background: white;
+            padding: 40px;
+            /* Restored to 40px */
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            /* Elevated Card */
+            box-sizing: border-box;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            border-bottom: 2px solid var(--brand-primary);
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            align-items: baseline;
+        }
+
+        .logo {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--brand-primary);
+            letter-spacing: -0.5px;
+        }
+
+        /* Patient Info Grid */
+        .patient-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            column-gap: 40px;
+            row-gap: 4px;
+            /* Tighter row gap */
+            margin-bottom: 25px;
+            /* Restored to 25px */
+            font-size: 11px;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border-color);
+            /* Solid line to match tables */
+            padding: 4px 0;
+        }
+
+        .label {
+            font-weight: 600;
+            color: var(--text-muted);
+        }
+
+        /* Summary Box with Left Accent Bar */
+        .result-summary-box {
+            background: var(--bg-summary);
+            border-left: 5px solid var(--accent-blue);
+            padding: 16px;
+            /* Reduced from 20px */
+            margin-bottom: 20px;
+            /* Reduced from 25px */
+            border-radius: 0 8px 8px 0;
+            display: grid;
+            grid-template-columns: 1fr;
+            row-gap: 4px;
+        }
+
+        .result-main {
+            font-size: 18px;
+            /* Reduced from 20px */
+            font-weight: 700;
+            margin: 0;
+            color: var(--brand-primary);
+        }
+
+        .gender-text {
+            font-size: 14px;
+            /* Reduced from 16px */
+            margin: 0;
+        }
+
+        .ff-box {
+            color: var(--accent-blue);
+            font-weight: 600;
+            font-size: 14px;
+            /* Reduced from 16px */
+
+        }
+
+        /* Table & Section Styles */
+        /* Table & Section Styles */
+        .section-title {
+            background: #f1f5f9;
+            /* Light Slate - softer than solid dark */
+            color: var(--brand-primary);
+            /* Dark Slate Text */
+            padding: 8px 12px;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            /* Modern editorial feel */
+            letter-spacing: 1px;
+            margin-top: 24px;
+            /* More breathing room */
+            margin-bottom: 8px;
+            /* Space before table */
+            border-left: 4px solid var(--accent-blue);
+            /* Matches Summary Box */
+            border-radius: 0 4px 4px 0;
+            display: flex;
+            align-items: center;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            /* Keep collapse for clean row lines */
+            table-layout: fixed;
+            margin-bottom: 8px;
+            border: none;
+            /* Remove outer border */
+        }
+
+        th,
+        td {
+            border: none;
+            /* Remove boxy borders */
+            border-bottom: 1px solid var(--border-color);
+            /* Clean row separators */
+            padding: 6px 8px;
+            /* Slightly more breathing room vertically */
+            font-size: 11px;
+            text-align: left;
+            vertical-align: middle;
+        }
+
+        th {
+            background: transparent;
+            /* Remove gray box, clean look */
+            width: 35%;
+            color: var(--text-muted);
+            /* Softer label */
+            font-weight: 500;
+        }
+
+        td {
+            color: var(--brand-primary);
+            /* Dark data */
+            font-weight: 600;
+            /* Emphasize result */
+        }
+
+        .interpretation-box {
+            padding: 15px;
+            border: 1px solid var(--border-color);
+            border-top: none;
+            font-size: 11px;
+            flex-grow: 1;
+            /* Expand to fill available space */
+        }
+
+        .footer {
+            margin-top: 10px;
+            /* Reduced from 30px */
+            font-size: 10px;
+            color: var(--text-muted);
+            border-top: 1px solid var(--border-color);
+            padding-top: 10px;
+            /* Reduced from 15px */
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            text-align: left;
+        }
+
+        /* Reference Data Tables (non-bold) */
+        .reference-table td {
+            font-weight: 400;
+        }
+
+        /* Dense Table for Page 3 */
+        .dense-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 0;
+        }
+
+        /* Dense Table for Page 3 */
+        .dense-table th,
+        .dense-table td {
+            padding: 1px 2px;
+            /* Ultra-dense to guarantee A4 fit */
+            font-size: 9px;
+            line-height: 1.1;
+            text-align: center;
+            border-bottom: 1px solid #f1f5f9;
+            font-weight: 400;
+        }
+
+        /* Print Optimization */
+        @media print {
+            body {
+                background: white;
+                padding: 0;
+            }
+
+            .page-break {
+                display: block;
+                break-before: page;
+                page-break-before: always;
+            }
+
+            .report-page {
+                width: 100%;
+                margin: 0;
+                box-shadow: none;
+                border-radius: 0;
+                padding: 20px;
+                /* Reduced padding for print margins */
+                break-after: avoid;
+                /* Avoid breaking inside pages if possible */
+                min-height: auto;
+                /* Let print flow naturally or enforce */
+            }
+
+            .result-summary-box {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+
+            .section-title {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+
+            th {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="report-page">
+        <div class="header">
+            <div class="logo-text" style="color: var(--brand-primary); font-size: 16px; font-weight: 700;">Non-Invasive
+                Prenatal Screening</div>
+            <img src="genolyx_logo.png" alt="Genolyx" style="height: 50px;">
+        </div>
+
+        <div class="patient-grid">
+            <div class="col">
+                <div class="info-row"><span class="label">Patient Name:</span> <span>{{Patient_Name}}</span></div>
+                <div class="info-row"><span class="label">Date of Birth:</span> <span>{{DOB}}</span></div>
+                <div class="info-row"><span class="label">Gestational Age:</span> <span>{{W}} Weeks {{D}} Days</span>
+                </div>
+                <div class="info-row"><span class="label">Pregnancy Type:</span> <span>{{Pregnancy_Type}}</span></div>
+                <div class="info-row"><span class="label">Medical Record Number (MRN):</span> <span>{{MRN}}</span></div>
+                <div class="info-row"><span class="label">Indication:</span> <span>{{Indication}}</span></div>
+            </div>
+            <div class="col">
+                <div class="info-row"><span class="label">Sample Number:</span> <span>{{Sample_Number}}</span></div>
+                <div class="info-row"><span class="label">Physician:</span> <span>{{Doctor}}</span></div>
+                <div class="info-row"><span class="label">Hospital/Clinic:</span> <span>{{Hospital}}</span></div>
+                <div class="info-row"><span class="label">Collection Date:</span> <span>{{Draw}}</span></div>
+                <div class="info-row"><span class="label">Report Date:</span> <span>{{Report}}</span></div>
+                <div class="info-row"><span class="label">Order ID:</span> <span>{{Order_ID}}</span></div>
+            </div>
+        </div>
+
+        <div class="result-summary-box">
+            <div class="result-main">Overall Result: {{Result_MDResult}}</div>
+            <div class="gender-text">Predicted Gender: <strong>{{Gender}}</strong></div>
+            <div class="ff-box">Fetal Fraction: {{FF_YFF}}</div>
+        </div>
+
+        <div class="section-title">Chromosomal Aneuploidies</div>
+        <table>
+            <thead>
+                <tr>
+                    <th scope="col">Trisomy 21 (Down Syndrome)</th>
+                    <td>{{T21_Result}}</td>
+                    <th scope="col">Trisomy 9</th>
+                    <td>{{9_Result}}</td>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <th scope="col">Trisomy 18 (Edwards Syndrome)</th>
+                    <td>{{T18_Result}}</td>
+                    <th scope="col">Trisomy 16</th>
+                    <td>{{T16_Result}}</td>
+                </tr>
+                <tr>
+                    <th scope="col">Trisomy 13 (Patau Syndrome)</th>
+                    <td>{{T13_Result}}</td>
+                    <th scope="col">Trisomy 22</th>
+                    <td>{{T22_Result}}</td>
+                </tr>
+                <tr>
+                    <th scope="col">All Other Autosomal Trisomy</th>
+                    <td>{{Other_Result}}</td>
+                    <td></td>
+                    <td></td>
+                </tr>
+                <!-- Sex Chromosomes moved to bottom -->
+                <tr>
+                    <th scope="col">XO (Turner Syndrome)</th>
+                    <td>{{XO_Result}}</td>
+                    <th scope="col">XXX (Trisomy X)</th>
+                    <td>{{XXX_Result}}</td>
+                </tr>
+                <tr>
+                    <th scope="col">XXY (Klinefelter Syndrome)</th>
+                    <td>{{XXY_Result}}</td>
+                    <th scope="col">XYY (Jacob Syndrome)</th>
+                    <td>{{XYY_Result}}</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="section-title">Microdeletions & Duplications</div>
+        <table>
+            <thead>
+                <tr>
+                    <th scope="col">1p36 deletion syndrome</th>
+                    <td>{{MD1}}</td>
+                    <th scope="col">Cri Du Chat syndrome</th>
+                    <td>{{MD6}}</td>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <th scope="col">Wolf-Hirschhorn syndrome</th>
+                    <td>{{MD2}}</td>
+                    <th scope="col">Jacobsen syndrome</th>
+                    <td>{{MD7}}</td>
+                </tr>
+                <tr>
+                    <th scope="col">Williams-Beuren syndrome</th>
+                    <td>{{MD3}}</td>
+                    <th scope="col">DiGeorge syndrome (22q11.2)</th>
+                    <td>{{MD8}}</td>
+                </tr>
+                <tr>
+                    <th scope="col">Prader-willi/Angelman syndrome</th>
+                    <td>{{MD4}}</td>
+                    <th scope="col">2q33.1 deletion syndrome</th>
+                    <td>{{MD5}}</td>
+                </tr>
+                <tr>
+                    <th scope="col">Other microdeletions/duplications</th>
+                    <td colspan="3">{{Other_MD}}</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="section-title">Interpretation</div>
+        <div class="interpretation-box">
+            {{Interpretation_MDI}}
+        </div>
+
+        <div class="footer">
+            <div class="footer-info">
+                Union Clinical Labs, No. 33, Lane 151, Section 2, Fuxing 5 Rd., Da'an District., Taipei City 106, Taiwan
+                (R.O.C)<br>
+                <strong>Lab Director: Min-Long Lai, PhD</strong> | CAP#: 6979606
+            </div>
+            <div class="page-number">Page 1 of 3</div>
+        </div>
+    </div>
+
+    <div class="page-break"></div>
+
+    <div class="report-page">
+        <div class="header">
+            <div class="logo-text" style="color: var(--brand-primary); font-size: 16px; font-weight: 700;">Non-Invasive
+                Prenatal Screening</div>
+            <img src="genolyx_logo.png" alt="Genolyx" style="height: 50px;">
+        </div>
+
+        <div class="section-title" style="margin-top: 0;">Performance Metrics</div>
+        <table class="reference-table">
+            <thead>
+                <tr>
+                    <th scope="col" style="width: 40%;">Condition</th>
+                    <th scope="col" style="width: 20%;">Sensitivity</th>
+                    <th scope="col" style="width: 20%;">Specificity</th>
+                    <th scope="col" style="width: 20%;">PPV</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Trisomy 21</td>
+                    <td>99.72%</td>
+                    <td>&gt;99%</td>
+                    <td>98.72%</td>
+                </tr>
+                <tr>
+                    <td>Trisomy 18</td>
+                    <td>99.04%</td>
+                    <td>&gt;99%</td>
+                    <td>96.49%</td>
+                </tr>
+                <tr>
+                    <td>Trisomy 13</td>
+                    <td>98.84%</td>
+                    <td>&gt;99%</td>
+                    <td>85.71%</td>
+                </tr>
+                <tr>
+                    <td>Monosomy X</td>
+                    <td>&gt;99%</td>
+                    <td>&gt;99%</td>
+                    <td>76%</td>
+                </tr>
+                <tr>
+                    <td>XXX</td>
+                    <td>&gt;99%</td>
+                    <td>&gt;99%</td>
+                    <td>&gt;99%</td>
+                </tr>
+                <tr>
+                    <td>XXY</td>
+                    <td>&gt;99%</td>
+                    <td>&gt;99%</td>
+                    <td>&gt;99%</td>
+                </tr>
+                <tr>
+                    <td>XYY</td>
+                    <td>&gt;99%</td>
+                    <td>&gt;99%</td>
+                    <td>&gt;99%</td>
+                </tr>
+                <tr>
+                    <td>T9, T16, T22</td>
+                    <td>&gt;99%</td>
+                    <td>&gt;99%</td>
+                    <td>50-99%</td>
+                </tr>
+                <tr>
+                    <td>All Other Trisomy</td>
+                    <td>&gt;99%</td>
+                    <td>&gt;99%</td>
+                    <td>NA</td>
+                </tr>
+                <tr>
+                    <td>Microdeletions/duplications</td>
+                    <td>20-99%</td>
+                    <td>&gt;99%</td>
+                    <td>NA</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div style="font-size: 10px; color: var(--text-muted); margin-top: 10px;">
+            <p style="margin: 0 0 4px 0;">* PPV performance was calculated based on amniocentesis and QF-PCR results.
+            </p>
+            <p style="margin: 0 0 4px 0;">* Due to insufficient number of amniocentesis samples, Sensitivity was
+                calculated by estimating true positive based on PPV.</p>
+            <p style="margin: 0 0 16px 0;">* Microdeletion sensitivity is based on size and fetal fraction. Minimum size
+                for microdeletion is 0.5 MB at 4% fetal fraction.</p>
+
+            <p style="margin-bottom: 8px;"><strong>Limitations:</strong> This test is designed to screen for fetal
+                chromosome abnormalities in singleton pregnancies that are at least 10 weeks gestation, as estimated by
+                last menstrual period. However, it is important to note that this test does not rule out the possibility
+                of other chromosomal or subchromosomal abnormalities, birth defects, or other conditions. Additionally,
+                this test is not intended to identify pregnancies at risk for open neural tube defects. A negative test
+                result does not mean that there are no chromosomal abnormalities present. There is a small chance that
+                the test results may not reflect the chromosomes of the fetus, but may instead reflect chromosomal
+                changes of the placenta or of the mother.</p>
+
+            <p style="margin-bottom: 16px;"><strong>Methods:</strong> UCL laboratory preformed low pass whole genome
+                sequencing from extracted cfDNA. The sequencing data was validated inhouse at UCL laboratory.</p>
+
+            <p style="margin-bottom: 4px;"><strong>References:</strong></p>
+            <ol style="margin: 0; padding-left: 15px; line-height: 1.3;">
+                <li>Anthony R et al., Noninvasive prenatal screening for fetal aneuploidy 2016 update: a position
+                    statement of the American College of Medical Genetics and Genomics. Genet Med 2016; 13:1056-65.</li>
+                <li>Bianchi DW et al., DNA sequencing versus standard prenatal aneuploidy screening. N Engl J Med. 2014;
+                    370:799-808.</li>
+                <li>YM Dennis Lo, RWK Chiu, Noninvasive prenatal diagnosis of fetal chromosomal aneuploidies by maternal
+                    plasma nucleic acid analysis; Clinical chemistry, 2008.</li>
+                <li>Chen, M., et al., Validation of fetal DNA fraction estimation and its application in noninvasive
+                    prenatal testing for aneuploidy detection in multiple pregnancies. Prenatal Diagnosis, 2019. 39(13):
+                    p. 1273-1282.</li>
+            </ol>
+        </div>
+
+        <div class="interpretation-box" style="border: none; flex-grow: 1;"></div> <!-- Spacer to push footer down -->
+
+        <div class="footer">
+            <div class="footer-info">
+                Union Clinical Labs, No. 33, Lane 151, Section 2, Fuxing 5 Rd., Da'an District., Taipei City 106, Taiwan
+                (R.O.C)<br>
+                <strong>Lab Director: Min-Long Lai, PhD</strong> | CAP#: 6979606
+            </div>
+            <div class="page-number">Page 2 of 3</div>
+        </div>
+    </div>
+
+    <div class="page-break"></div>
+
+    <div class="report-page">
+        <div class="header">
+            <div class="logo-text" style="color: var(--brand-primary); font-size: 16px; font-weight: 700;">Non-Invasive
+                Prenatal Screening</div>
+            <img src="genolyx_logo.png" alt="Genolyx" style="height: 50px;">
+        </div>
+
+        <div class="section-title" style="margin-top: 0;">Microdeletions/duplications syndromes</div>
+
+        <table class="dense-table">
+            <thead>
+                <tr>
+                    <th scope="col" style="width: 25%;">Condition</th>
+                    <th scope="col" style="width: 25%;">Condition</th>
+                    <th scope="col" style="width: 25%;">Condition</th>
+                    <th scope="col" style="width: 25%;">Condition</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>1p36 terminal region (includes GABRD) gain</td>
+                    <td>Partial trisomy 5p</td>
+                    <td>Partial trisomy 12p</td>
+                    <td>17q11.2 recurrent region (includes NF1) gain</td>
+                </tr>
+                <tr>
+                    <td>1q21.1 recurrent region (distal, BP3-BP4) (includes GJA5) loss</td>
+                    <td>Partial monosomy 5q</td>
+                    <td>Partial trisomy 12q</td>
+                    <td>17q11.2 recurrent region (includes NF1) loss</td>
+                </tr>
+                <tr>
+                    <td>1q21.1 recurrent region (distal, BP3-BP4) (includes GJA5) gain</td>
+                    <td>Partial trisomy 5q</td>
+                    <td>Monosomy 13q14</td>
+                    <td>17q12 recurrent (RCAD syndrome) region (includes HNF1B) gain</td>
+                </tr>
+                <tr>
+                    <td>1q43-q44 terminal region (includes AKT3)</td>
+                    <td>6q24 region (includes PLAGL1)</td>
+                    <td>Monosomy 13q21-qter</td>
+                    <td>17q12 recurrent (RCAD syndrome) region (includes HNF1B) loss</td>
+                </tr>
+                <tr>
+                    <td>Partial monosomy 1p</td>
+                    <td>Partial trisomy 6p</td>
+                    <td>Trisomy 13cen-q14</td>
+                    <td>17q21.31 recurrent region (includes KANSL1)</td>
+                </tr>
+                <tr>
+                    <td>Monosomy 1q21-q32</td>
+                    <td>Partial monosomy 6q</td>
+                    <td>Trisomy 13q21-qter</td>
+                    <td>17q23.1-q23.2 recurrent region (includes TBX2, TBX4) gain</td>
+                </tr>
+                <tr>
+                    <td>Monosomy 1q42-qter</td>
+                    <td>Partial trisomy 6q</td>
+                    <td>14q11.2 region including CHD8 and SUPT16H</td>
+                    <td>17q23.1-q23.2 recurrent region (includes TBX2, TBX4) loss</td>
+                </tr>
+                <tr>
+                    <td>Trisomy 1q23-qter</td>
+                    <td>7p22.1 region (includes ACTB)</td>
+                    <td>DLK1-MEG3 Intergenic Region</td>
+                    <td>SOX9 upstream enhancer region</td>
+                </tr>
+                <tr>
+                    <td>2p15-p16.1 region (includes BCL11A)</td>
+                    <td>7q11.23 recurrent (Williams-Beuren syndrome) region (includes ELN) gain</td>
+                    <td>Partial trisomy 14</td>
+                    <td>Trisomy 17pter-q21</td>
+                </tr>
+                <tr>
+                    <td>2p24.3 MYCN-DDX1 duplication region</td>
+                    <td>7q11.23 recurrent distal region (includes HIP1, YWHAG)</td>
+                    <td>Trisomy 14q24-qter</td>
+                    <td>Partial monosomy 18p</td>
+                </tr>
+                <tr>
+                    <td>2q11.2 recurrent region (includes ARID5A, TMEM127)</td>
+                    <td>7q36.3 ZRS (SHH cis-regulatory) duplication region (within LMBR1 intron 5)</td>
+                    <td>15q11.2-q13 recurrent (PWS/AS) region (Class I, BP1-BP3 and Class II, BP2-BP3) gain</td>
+                    <td>Partial tetrasomy 18p</td>
+                </tr>
+                <tr>
+                    <td>2q13 recurrent region (distal) (includes BCL2L11) gain</td>
+                    <td>Partial monosomy 7p</td>
+                    <td>15q13.3 recurrent region (BP4-BP5) (includes CHRNA7)</td>
+                    <td>Trisomy 18pter-q12</td>
+                </tr>
+                <tr>
+                    <td>2q13 recurrent region (distal) (includes BCL2L11) loss</td>
+                    <td>Partial trisomy 7p</td>
+                    <td>15q13.3 recurrent region (D-CHRNA7 to BP5) (includes CHRNA7, OTUD7A)</td>
+                    <td>Monosomy 18q21-qter</td>
+                </tr>
+                <tr>
+                    <td>Partial monosomy 2p</td>
+                    <td>Monosomy 7q32-qter</td>
+                    <td>15q24 recurrent region (LCR A-LCR C)</td>
+                    <td>Trisomy 18q12-qter</td>
+                </tr>
+                <tr>
+                    <td>Partial trisomy 2p</td>
+                    <td>Trisomy 7q21-q31</td>
+                    <td>15q24 recurrent region (LCR A-LCR D) (includes SIN3A)</td>
+                    <td>Partial monosomy 20p</td>
+                </tr>
+                <tr>
+                    <td>Partial monosomy 2q</td>
+                    <td>Trisomy 7q32-qter</td>
+                    <td>15q24 recurrent region (LCR C-LCR D) (includes SIN3A)</td>
+                    <td>Trisomy 20p</td>
+                </tr>
+                <tr>
+                    <td>Partial trisomy 2q</td>
+                    <td>8p23.1 recurrent region (includes GATA4) gain</td>
+                    <td>15q25.2 recurrent region (proximal, LCR-A/B-C) (includes RPS17)</td>
+                    <td>Partial monosomy 21</td>
+                </tr>
+                <tr>
+                    <td>3q24 Region (includes ZIC1)</td>
+                    <td>8p23.1 recurrent region (includes GATA4) loss</td>
+                    <td>Supernumerary inv dup (15)</td>
+                    <td>22q11.2 recurrent (DGS) region (proximal, A-B, A-C, or A-D) (includes TBX1) gain</td>
+                </tr>
+                <tr>
+                    <td>3q29 recurrent region (includes DLG1)</td>
+                    <td>Partial trisomy 8q</td>
+                    <td>Trisomy 15q22-qter</td>
+                    <td>22q11.2 recurrent region (central, B-D or C-D) (includes CRKL)</td>
+                </tr>
+                <tr>
+                    <td>Monosomy 3p11-p21</td>
+                    <td>Partial monosomy 9p</td>
+                    <td>16p11.2 recurrent region (distal, BP2-BP3) (includes SH2B1)</td>
+                    <td>22q11.2 recurrent region (distal type I, D-E or D-F)</td>
+                </tr>
+                <tr>
+                    <td>Monosomy 3p25-pter</td>
+                    <td>Partial trisomy 9p</td>
+                    <td>16p11.2 recurrent region (proximal, BP4-BP5) (includes TBX6) gain</td>
+                    <td>22q11.2 recurrent region (distal type III, D-G, D-H) (includes SMARCB1)</td>
+                </tr>
+                <tr>
+                    <td>Partial trisomy 3p</td>
+                    <td>Partial monosomy 9q</td>
+                    <td>16p11.2 recurrent region (proximal, BP4-BP5) (includes TBX6) loss</td>
+                    <td>22q11.2 recurrent region (distal type III, E-H or F-H) (includes SMARCB1)</td>
+                </tr>
+                <tr>
+                    <td>Partial monosomy 3q</td>
+                    <td>Partial trisomy 9q</td>
+                    <td>16p12.2 recurrent region (proximal) (includes EEF2K, CDR2)</td>
+                    <td>22q11.2 recurrent region (distal type III, F-G) (includes SMARCB1)</td>
+                </tr>
+                <tr>
+                    <td>Partial trisomy 3q</td>
+                    <td>10q22.3-q23.2 recurrent region (includes BMPR1A)</td>
+                    <td>16p13.11 recurrent region (BP1-BP3, BP2-BP3, or BP2-BP4) (includes MYH11) gain</td>
+                    <td>22q11.21 recurrent (CES) region (includes CECR2)</td>
+                </tr>
+                <tr>
+                    <td>Partial monosomy 3p</td>
+                    <td>Partial monosomy 10p</td>
+                    <td>16p13.11 recurrent region (BP1-BP3, BP2-BP3, or BP2-BP4) (includes MYH11) loss</td>
+                    <td>Xp22.31 recurrent region (includes STS)</td>
+                </tr>
+                <tr>
+                    <td>4p16.3 terminal (Wolf-Hirschhorn syndrome) region gain</td>
+                    <td>Partial trisomy 10p</td>
+                    <td>16p13.3 region (includes CREBBP)</td>
+                    <td>Xp21.2 region (includes NROB1)</td>
+                </tr>
+                <tr>
+                    <td>Partial monosomy 4p</td>
+                    <td>Partial monosomy 10q</td>
+                    <td>Partial trisomy 16p</td>
+                    <td>Xp11.23 region (includes MAOA and MAOB)</td>
+                </tr>
+                <tr>
+                    <td>Partial trisomy 4p</td>
+                    <td>Partial trisomy 10q</td>
+                    <td>Partial monosomy 16q</td>
+                    <td>Xp11.22-p11.23 recurrent region (includes SHROOM4)</td>
+                </tr>
+                <tr>
+                    <td>Monosomy 4q21-q31</td>
+                    <td>11p11.2 (Potocki-Shaffer syndrome) region (includes ALX4, EXT2)</td>
+                    <td>Partial trisomy 16q</td>
+                    <td>Xp11.22 region (includes HUWE1)</td>
+                </tr>
+                <tr>
+                    <td>Monosomy 4q31-qter</td>
+                    <td>11p13 (WAGR syndrome) region</td>
+                    <td>17p11.2 recurrent (SMS/PLS) region (includes RAI1) gain</td>
+                    <td>Xq25 region (includes STAG2) gain</td>
+                </tr>
+                <tr>
+                    <td>Partial trisomy 4q</td>
+                    <td>11q13.2-q13.4 recurrent region (includes SHANK2, FGF3)</td>
+                    <td>17p11.2 recurrent (SMS/PLS) region (includes RAI1) loss</td>
+                    <td>Xq25 region (includes STAG2) loss</td>
+                </tr>
+                <tr>
+                    <td>Partial monosomy 4p</td>
+                    <td>Partial trisomy 11p</td>
+                    <td>17p12 recurrent (HNPP/CMT1A) region (includes PMP22) gain</td>
+                    <td>Xq28 recurrent region (includes GDI1)</td>
+                </tr>
+                <tr>
+                    <td>5p15 terminal (Cri du chat syndrome) region gain</td>
+                    <td>Partial monosomy 11q</td>
+                    <td>17p12 recurrent (HNPP/CMT1A) region (includes PMP22) loss</td>
+                    <td>Xq28 recurrent region (int22h1/int22h2-flanked) (includes RAB39B) gain</td>
+                </tr>
+                <tr>
+                    <td>5q35 recurrent (Sotos syndrome) region (includes NSD1) gain</td>
+                    <td>Partial trisomy 11q</td>
+                    <td>17p13.3 (Miller-Dieker syndrome) region (includes YWHAE and PAFAH1B1) gain</td>
+                    <td>Xq28 recurrent region (int22h1/int22h2-flanked) (includes RAB39B) loss</td>
+                </tr>
+                <tr>
+                    <td>5q35 recurrent (Sotos syndrome) region (includes NSD1) loss</td>
+                    <td>Partial monosomy 12p</td>
+                    <td>17p13.3 (Miller-Dieker syndrome) region (includes YWHAE and PAFAH1B1) loss</td>
+                    <td>Xq28 region (includes MECP2) gain</td>
+                </tr>
+                <tr>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td>Xq28 region (includes MECP2) loss</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="interpretation-box" style="border: none; flex-grow: 1;"></div>
+
+        <div class="footer">
+            <div class="footer-info">
+                Union Clinical Labs, No. 33, Lane 151, Section 2, Fuxing 5 Rd., Da'an District., Taipei City 106, Taiwan
+                (R.O.C)<br>
+                <strong>Lab Director: Min-Long Lai, PhD</strong> | CAP#: 6979606
+            </div>
+            <div class="page-number">Page 3 of 3</div>
+        </div>
+    </div>
+
+</body>
+
+</html>

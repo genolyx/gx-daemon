@@ -19,3 +19,18 @@ venv/
 .vscode/
 *.swp
 *.swo
+
+# HGMD and other large licensed reference/annotation data files
+*.vcf.gz
+*.vcf.gz.tbi
+*.vcf.gz.tbl
+*.xltx
+hgmd_*
+HGMD_*
+
+# Large/generated archive and report files
+*.zip
+
+# macOS metadata directories (created when unzipping on macOS)
+__MACOSX/
+.DS_Store

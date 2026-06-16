@@ -57,7 +57,6 @@ def _report_logo_src(template_dir: Optional[str] = None) -> str:
     if resolved:
         candidates.append(os.path.join(resolved, SGNIPT_LOGO_FILENAME))
     candidates.extend([
-        "/home/sam/GX_Report_html/genolyx_logo.png",
         "/home/ken/gx-daemon/data/report_templates/genolyx_logo.png",
     ])
     seen = set()

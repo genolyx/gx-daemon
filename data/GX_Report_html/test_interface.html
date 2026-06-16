@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Genolyx Report Generator - Test Interface</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+            background: #f1f5f9;
+        }
+
+        .sidebar {
+            width: 350px;
+            background: white;
+            padding: 20px;
+            box-shadow: 2px 0 5px rgba(0, 0, 0, 0.05);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
+        .preview {
+            flex-grow: 1;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        h2 {
+            margin-top: 0;
+            color: #0f172a;
+        }
+
+        .group {
+            margin-bottom: 20px;
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 15px;
+        }
+
+        .group:last-child {
+            border-bottom: none;
+        }
+
+        .group-title {
+            font-size: 12px;
+            text-transform: uppercase;
+            color: #64748b;
+            font-weight: 700;
+            margin-bottom: 10px;
+            letter-spacing: 0.5px;
+        }
+
+        label {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: #334155;
+            cursor: pointer;
+        }
+
+        input[type="checkbox"] {
+            margin-right: 10px;
+            width: 16px;
+            height: 16px;
+        }
+
+        button {
+            background: #06b6d4;
+            color: white;
+            border: none;
+            padding: 12px;
+            font-weight: 600;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: auto;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: #0891b2;
+        }
+
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: 1px solid #e2e8f0;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="sidebar">
+        <h2>Report Configuration</h2>
+
+        <div class="group">
+            <div class="group-title">Aneuploidies</div>
+            <label><input type="checkbox" id="include_common_trisomies" checked> Common Trisomies (13, 18, 21)</label>
+            <label><input type="checkbox" id="include_additional_trisomies" checked> Additional Trisomies (9, 16,
+                22)</label>
+            <label><input type="checkbox" id="include_other_autosomal" checked> Other Autosomal Trisomies</label>
+        </div>
+
+        <div class="group">
+            <div class="group-title">Sex Chromosomes</div>
+            <label><input type="checkbox" id="include_sex_chromosomes" checked> Sex Chromosome Aneuploidies</label>
+        </div>
+
+        <div class="group">
+            <div class="group-title">Microdeletions</div>
+            <label><input type="checkbox" id="include_common_microdeletions" checked> Common 8 Panel (Page 1)</label>
+            <label><input type="checkbox" id="include_comprehensive_microdeletions" checked> Comprehensive Panel (Page
+                3)</label>
+        </div>
+
+        <div class="control-group">
+            <h3>JSON Data Injection</h3>
+            <p>Paste JSON here or upload a file to override report data.</p>
+            <input type="file" id="jsonFile" accept=".json" style="margin-bottom: 10px;">
+            <textarea id="jsonData"
+                placeholder='{"Patient_Name": "Custom Name", "Result_MDResult": "High Risk"}'></textarea>
+        </div>
+
+        <button onclick="generateReport()">Generate Report</button>
+    </div>
+
+    <div class="preview">
+        <iframe id="reportFrame" src="/view_report"></iframe>
+    </div>
+
+    <script>
+        async function generateReport() {
+            const options = {
+                "include_common_trisomies": document.getElementById('include_common_trisomies').checked,
+                "include_additional_trisomies": document.getElementById('include_additional_trisomies').checked,
+                "include_other_autosomal": document.getElementById('include_other_autosomal').checked,
+                "include_sex_chromosomes": document.getElementById('include_sex_chromosomes').checked,
+                "include_common_microdeletions": document.getElementById('include_common_microdeletions').checked,
+                "include_comprehensive_microdeletions": document.getElementById('include_comprehensive_microdeletions').checked
+            };
+
+            const btn = document.querySelector('button');
+            const originalText = btn.innerText;
+
+            // Parse Custom JSON
+            let customData = null;
+            const jsonStr = document.getElementById('jsonData').value.trim();
+            if (jsonStr) {
+                try {
+                    customData = JSON.parse(jsonStr);
+                } catch (e) {
+                    alert("Invalid JSON data: " + e.message);
+                    return;
+                }
+            }
+
+            btn.innerText = 'Generating...';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch('/generate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        options: options,
+                        custom_data: customData
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    // Refresh iframe
+                    document.getElementById('reportFrame').src = '/view_report?t=' + new Date().getTime();
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            } catch (error) {
+                alert('Error: ' + error);
+            } finally {
+                btn.innerText = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        // File Upload Handler
+        document.getElementById('jsonFile').addEventListener('change', function (e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                document.getElementById('jsonData').value = e.target.result;
+            };
+            reader.readAsText(file);
+        });
+    </script>
+</body>
+
+</html>

@@ -843,12 +843,18 @@ class HGMDAnnotator:
                     continue
 
                 info = rec.info
+                hgvsc_raw = self._first_val(info, "HGVSC")
+                # PMID: 콤마 구분, 최대 5개
+                pmid_raw = self._first_val(info, "PMID")
+                pmids = [p.strip() for p in pmid_raw.split(",") if p.strip()] if pmid_raw else []
+                pmid_str = ",".join(pmids[:5])
                 result = {
                     "hgmd_class": self._first_val(info, "CLASS") or self._first_val(info, "HGMDCLASS"),
                     "hgmd_gene": self._first_val(info, "GENE"),
                     "hgmd_disease": self._first_val(info, "DISEASE") or self._first_val(info, "PHEN"),
-                    "hgmd_pmid": self._first_val(info, "PMID"),
+                    "hgmd_pmid": pmid_str,
                     "hgmd_id": rec.id or "",
+                    "hgmd_hgvsc": hgvsc_raw if hgvsc_raw and hgvsc_raw != "." else "",
                 }
                 vf.close()
                 return result
@@ -1167,6 +1173,7 @@ class VariantAnnotator:
             "hgmd_disease": (hgmd or {}).get("hgmd_disease", ""),
             "hgmd_pmid": (hgmd or {}).get("hgmd_pmid", ""),
             "hgmd_id": (hgmd or {}).get("hgmd_id", ""),
+            "hgmd_hgvsc": (hgmd or {}).get("hgmd_hgvsc", ""),
 
             # Curated Variant DB
             "curated_classification": (curated or {}).get("classification", ""),
@@ -1338,8 +1345,7 @@ class VariantAnnotator:
             "hgmd_disease": (hgmd or {}).get("hgmd_disease", ""),
             "hgmd_pmid": (hgmd or {}).get("hgmd_pmid", ""),
             "hgmd_id": (hgmd or {}).get("hgmd_id", ""),
-
-            # Curated Variant DB (로컬 DB)
+            "hgmd_hgvsc": (hgmd or {}).get("hgmd_hgvsc", ""),
             "curated_classification": (curated or {}).get("classification", ""),
             "curated_source": (curated or {}).get("source", ""),
             "curated_notes": (curated or {}).get("notes", ""),

@@ -833,9 +833,16 @@ def _compute_order_gene_knowledge(
     ai_ollama_base_url = ai_cfg["ollama_base_url"]
     ai_ollama_model = ai_cfg["ollama_model"]
     allow_ollama = bool(ai_provider == "ollama" and (enrich or force_refresh))
+    allow_local  = bool(ai_provider == "local"  and (enrich or force_refresh))
+
+    # Annotation file paths (for local provider)
+    clinvar_vcf = (getattr(settings, "clinvar_vcf", None) or "").strip() or ""
+    hgmd_vcf    = (getattr(settings, "hgmd_vcf",    None) or "").strip() or ""
 
     gene_set = set(genes)
     variant_keys_set: set = set()
+    # Build per-gene variant lists for local provider
+    gene_variants: Dict[str, list] = {g: [] for g in gene_set}
     all_variants = (
         (result_data.get("variants") or [])
         + (result_data.get("clinical_findings") or [])
@@ -849,6 +856,7 @@ def _compute_order_gene_knowledge(
                 g = tn.split("|")[0].split("_")[0].upper()
         if g and g in gene_set:
             variant_keys_set.add(make_variant_key(g, str(v.get("hgvsc") or ""), str(v.get("hgvsp") or "")))
+            gene_variants[g].append(v)
     variants_out = load_variant_knowledge_for_keys(db_path, list(variant_keys_set))
 
     if force_refresh and not gemini_key and ai_provider == "gemini":
@@ -859,7 +867,17 @@ def _compute_order_gene_knowledge(
     out: Dict[str, Any] = {}
     gemini_fetch_error: Optional[str] = None
     for gene in genes:
-        if ai_provider == "ollama" and (force_refresh or allow_ollama):
+        if ai_provider == "local" and (force_refresh or allow_local):
+            row, gerr = refresh_gene_knowledge(
+                gene, db_path,
+                provider="local",
+                variants=gene_variants.get(gene, []),
+                hgmd_vcf=hgmd_vcf,
+                clinvar_vcf=clinvar_vcf,
+            )
+            if gerr:
+                gemini_fetch_error = gerr
+        elif ai_provider == "ollama" and (force_refresh or allow_ollama):
             row, gerr = refresh_gene_knowledge(
                 gene, db_path,
                 provider="ollama",
@@ -1111,6 +1129,8 @@ async def health():
 async def get_ai_config():
     """Return current effective AI provider settings."""
     cfg = _get_ai_cfg()
+    hgmd_vcf    = (getattr(settings, "hgmd_vcf",    None) or "").strip()
+    clinvar_vcf = (getattr(settings, "clinvar_vcf", None) or "").strip()
     return {
         "provider": cfg["provider"],
         "gemini": {
@@ -1121,6 +1141,10 @@ async def get_ai_config():
             "base_url": cfg["ollama_base_url"],
             "model": cfg["ollama_model"],
         },
+        "local": {
+            "hgmd_vcf":    hgmd_vcf    if os.path.isfile(hgmd_vcf)    else None,
+            "clinvar_vcf": clinvar_vcf if os.path.isfile(clinvar_vcf) else None,
+        },
         "runtime_overrides": dict(_runtime_ai),
     }
 
@@ -1129,13 +1153,13 @@ async def get_ai_config():
 async def patch_ai_config(request: Request):
     """
     Update runtime AI provider settings (no daemon restart needed).
-    Body: { "provider": "gemini"|"ollama", "ollama_base_url": "...", "ollama_model": "..." }
+    Body: { "provider": "gemini"|"ollama"|"local", "ollama_base_url": "...", "ollama_model": "..." }
     """
     body = await request.json()
     if "provider" in body:
         v = str(body["provider"]).lower().strip()
-        if v not in ("gemini", "ollama"):
-            raise HTTPException(status_code=400, detail="provider must be 'gemini' or 'ollama'")
+        if v not in ("gemini", "ollama", "local"):
+            raise HTTPException(status_code=400, detail="provider must be 'gemini', 'ollama', or 'local'")
         _runtime_ai["provider"] = v
     if "ollama_base_url" in body:
         _runtime_ai["ollama_base_url"] = str(body["ollama_base_url"]).rstrip("/")
@@ -1578,11 +1602,14 @@ async def generate_report(order_id: str, req: ReportGenerateRequest = Body(...))
 @app.post("/order/{order_id}/classify-variants")
 async def classify_variants_endpoint(order_id: str, request: Request):
     """
-    소수의 variant(chrom/pos/ref/alt)를 ClinVar + ACMG rule-based로 즉시 분류.
-    sgNIPT Review 탭에서 필터된 variant에 on-demand 분류 결과를 반환합니다.
+    소수의 variant(chrom/pos/ref/alt)를 ClinVar + HGMD P/LP 기준으로 즉시 분류.
+    - ClinVar Pathogenic/Likely_pathogenic → Pathogenic
+    - HGMD DM (Disease Mutation) → Pathogenic
+    - HGMD DM? → Likely Pathogenic
+    - 그 외 → VUS (full ACMG는 WES/WGS용이므로 sgNIPT/carrier에서는 미사용)
 
     Request body: {"variants": [{"chrom":"chr1","pos":11114297,"ref":"C","alt":"T"}, ...]}
-    Response:     {"results": [{...variant + acmg_classification + clinvar fields...}]}
+    Response:     {"results": [{...variant + classification + clinvar/hgmd fields...}]}
     """
     body = await request.json()
     variants_in: list = body.get("variants") or []
@@ -1590,122 +1617,148 @@ async def classify_variants_endpoint(order_id: str, request: Request):
         return JSONResponse({"results": []})
 
     def _do_classify():
-        from .services.carrier_screening.annotator import ClinVarAnnotator, GnomADAnnotator
-        from .services.carrier_screening.acmg import classify_acmg_lite
+        from .services.carrier_screening.annotator import ClinVarAnnotator, HGMDAnnotator
 
         clinvar_vcf = (getattr(settings, "clinvar_vcf", None) or "").strip() or None
-        gnomad_dir  = (getattr(settings, "gnomad_dir", None) or "").strip() or None
-        gnomad_genomes_glob = getattr(settings, "gnomad_genomes_glob", "gnomad.genomes.v*.sites*.bgz")
-        gnomad_exomes_glob  = getattr(settings, "gnomad_exomes_glob",  "gnomad.exomes.v*.sites*.bgz")
+        hgmd_vcf    = (getattr(settings, "hgmd_vcf",    None) or "").strip() or None
 
-        clinvar_ann = None
-        gnomad_ann  = None
-        _pysam_cv   = None
-        _cv_has_chr = None
+        clinvar_ann = ClinVarAnnotator(clinvar_vcf) if clinvar_vcf and os.path.isfile(clinvar_vcf) else None
+        hgmd_ann    = HGMDAnnotator(hgmd_vcf)       if hgmd_vcf    and os.path.isfile(hgmd_vcf)    else None
 
-        if clinvar_vcf and os.path.isfile(clinvar_vcf):
-            clinvar_ann = ClinVarAnnotator(clinvar_vcf)
+        # Keep pysam connections open across all variants for speed
+        import pysam as _pysam
+
+        def _open_vcf(path):
+            if not path or not os.path.isfile(path):
+                return None, None
             try:
-                import pysam as _pysam
-                _pysam_cv = _pysam.VariantFile(clinvar_vcf)
-                contigs = list(_pysam_cv.header.contigs)
-                _cv_has_chr = any(str(c).startswith("chr") for c in contigs) if contigs else True
+                vf = _pysam.VariantFile(path)
+                contigs = list(vf.header.contigs)
+                has_chr = any(str(c).startswith("chr") for c in contigs) if contigs else True
+                return vf, has_chr
             except Exception:
-                _pysam_cv = None
+                return None, None
 
-        if gnomad_dir and os.path.isdir(gnomad_dir):
-            try:
-                gnomad_ann = GnomADAnnotator(gnomad_dir, gnomad_genomes_glob, gnomad_exomes_glob)
-            except Exception:
-                gnomad_ann = None
+        cv_vf, cv_has_chr   = _open_vcf(clinvar_vcf)
+        hgmd_vf, hgmd_has_chr = _open_vcf(hgmd_vcf)
+
+        def _norm_chrom(chrom, has_chr):
+            c = str(chrom)
+            if has_chr:
+                return c if c.startswith("chr") else "chr" + c
+            return c.lstrip("chr") if c.startswith("chr") else c
 
         results = []
         for v in variants_in:
             out = dict(v)
-            chrom = str(v.get("chrom") or "")
+            chrom   = str(v.get("chrom") or "")
             pos_val = v.get("pos")
-            ref = str(v.get("ref") or "")
-            alt = str(v.get("alt") or "")
+            ref     = str(v.get("ref") or "")
+            alt     = str(v.get("alt") or "")
 
             if not (chrom and pos_val is not None and ref and alt):
                 out.setdefault("acmg_classification", "")
                 results.append(out)
                 continue
 
-            # ClinVar — reuse single pysam connection
+            pos_int = int(pos_val)
+
+            # ── ClinVar lookup ──────────────────────────────────
             cv_result = None
-            if clinvar_ann and _pysam_cv is not None:
+            if clinvar_ann and cv_vf is not None:
                 try:
-                    qc = ("chr" + chrom.lstrip("chr")) if _cv_has_chr else chrom.lstrip("chr")
-                    for rec in _pysam_cv.fetch(qc, int(pos_val) - 1, int(pos_val)):
-                        if rec.pos != int(pos_val) or rec.ref != ref:
+                    qc = _norm_chrom(chrom, cv_has_chr)
+                    for rec in cv_vf.fetch(qc, pos_int - 1, pos_int):
+                        if rec.pos != pos_int or rec.ref != ref:
                             continue
                         if not rec.alts or alt not in rec.alts:
                             continue
-                        cv_result = clinvar_ann.lookup(chrom, int(pos_val), ref, alt)
+                        cv_result = clinvar_ann.lookup(chrom, pos_int, ref, alt)
                         break
                 except Exception as e:
                     logger.debug("classify-variants ClinVar %s:%s: %s", chrom, pos_val, e)
-            elif clinvar_ann:
-                try:
-                    cv_result = clinvar_ann.lookup(chrom, int(pos_val), ref, alt)
-                except Exception:
-                    pass
 
             if cv_result:
-                out["clinvar_sig"]         = cv_result.get("clnsig", "")
-                out["clinvar_sig_primary"] = cv_result.get("clnsig_primary", "")
-                out["clinvar_stars"]       = int(cv_result.get("stars") or 0)
-                out["clinvar_dn"]          = cv_result.get("clndn", "")
-                out["clinvar_variation_id"]= cv_result.get("variation_id", "")
-                out["clinvar_revstat"]     = cv_result.get("revstat", "")
+                out["clinvar_sig"]          = cv_result.get("clnsig", "")
+                out["clinvar_sig_primary"]  = cv_result.get("clnsig_primary", "")
+                out["clinvar_stars"]        = int(cv_result.get("stars") or 0)
+                out["clinvar_dn"]           = cv_result.get("clndn", "")
+                out["clinvar_variation_id"] = cv_result.get("variation_id", "")
+                out["clinvar_revstat"]      = cv_result.get("revstat", "")
             else:
                 out.setdefault("clinvar_sig", "")
                 out.setdefault("clinvar_sig_primary", "")
                 out.setdefault("clinvar_stars", 0)
                 out.setdefault("clinvar_dn", "")
 
-            # gnomAD
-            gnomad_af = None
-            if gnomad_ann:
+            # ── HGMD lookup ─────────────────────────────────────
+            hgmd_result = None
+            if hgmd_ann and hgmd_vf is not None:
                 try:
-                    gn = gnomad_ann.lookup(chrom, int(pos_val), ref, alt)
-                    gnomad_af = gn.get("af")
-                except Exception:
-                    pass
-            if gnomad_af is not None:
-                out["gnomad_af"] = gnomad_af
+                    qh = _norm_chrom(chrom, hgmd_has_chr)
+                    for rec in hgmd_vf.fetch(qh, pos_int - 1, pos_int):
+                        if rec.pos != pos_int or rec.ref != ref:
+                            continue
+                        if not rec.alts or alt not in rec.alts:
+                            continue
+                        hgmd_result = hgmd_ann.lookup(chrom, pos_int, ref, alt)
+                        break
+                except Exception as e:
+                    logger.debug("classify-variants HGMD %s:%s: %s", chrom, pos_val, e)
 
-            # ACMG rule-based
-            try:
-                acmg_res = classify_acmg_lite({
-                    "chrom": chrom, "pos": pos_val, "ref": ref, "alt": alt,
-                    "gene": (v.get("gene") or "").strip().upper(),
-                    "effect": v.get("effect") or "",
-                    "clinvar_sig_primary": out.get("clinvar_sig_primary") or "",
-                    "clinvar_stars": out.get("clinvar_stars") or 0,
-                    "gnomad_af": gnomad_af,
-                })
-                out["acmg_classification"] = acmg_res.get("classification", "VUS")
-                out["acmg_criteria"]       = acmg_res.get("criteria_met", [])
-                out["acmg_reasoning"]      = acmg_res.get("reasoning", "")
-                out["acmg_confidence"]     = acmg_res.get("confidence", "low")
-            except Exception as e:
-                logger.debug("classify-variants ACMG %s:%s: %s", chrom, pos_val, e)
-                out.setdefault("acmg_classification", "VUS")
+            if hgmd_result:
+                out["hgmd_class"]   = hgmd_result.get("hgmd_class", "")
+                out["hgmd_gene"]    = hgmd_result.get("hgmd_gene", "")
+                out["hgmd_disease"] = hgmd_result.get("hgmd_disease", "")
+                out["hgmd_pmid"]    = hgmd_result.get("hgmd_pmid", "")
+                out["hgmd_id"]      = hgmd_result.get("hgmd_id", "")
+                out["hgmd_hgvsc"]   = hgmd_result.get("hgmd_hgvsc", "")
+            else:
+                out.setdefault("hgmd_class", "")
+                out.setdefault("hgmd_hgvsc", "")
 
+            # ── Simple P/LP classification (ClinVar + HGMD) ─────
+            # Full ACMG criteria is for WES/WGS rare disease; sgNIPT/carrier use P/LP only
+            clnsig_primary = (out.get("clinvar_sig_primary") or "").lower()
+            hgmd_class     = (out.get("hgmd_class") or "").upper()
+
+            if "pathogenic" in clnsig_primary and "likely" not in clnsig_primary:
+                classification = "Pathogenic"
+                reasoning      = f"ClinVar: {out.get('clinvar_sig_primary', '')} ({out.get('clinvar_stars', 0)}★)"
+            elif "likely_pathogenic" in clnsig_primary or "likely pathogenic" in clnsig_primary:
+                classification = "Likely Pathogenic"
+                reasoning      = f"ClinVar: {out.get('clinvar_sig_primary', '')} ({out.get('clinvar_stars', 0)}★)"
+            elif hgmd_class == "DM":
+                classification = "Pathogenic"
+                reasoning      = f"HGMD: Disease-causing mutation (DM); {out.get('hgmd_disease', '')}"
+            elif hgmd_class == "DM?":
+                classification = "Likely Pathogenic"
+                reasoning      = f"HGMD: Probable disease-causing mutation (DM?); {out.get('hgmd_disease', '')}"
+            elif "benign" in clnsig_primary:
+                classification = "Benign"
+                reasoning      = f"ClinVar: {out.get('clinvar_sig_primary', '')}"
+            else:
+                classification = "VUS"
+                reasoning      = "Not found in ClinVar (P/LP) or HGMD (DM/DM?)"
+
+            out["acmg_classification"] = classification
+            out["acmg_reasoning"]      = reasoning
+            out["acmg_criteria"]       = []
             results.append(out)
 
-        if _pysam_cv:
-            try:
-                _pysam_cv.close()
-            except Exception:
-                pass
+        for vf_handle in (cv_vf, hgmd_vf):
+            if vf_handle:
+                try:
+                    vf_handle.close()
+                except Exception:
+                    pass
 
         pathogenic_n = sum(1 for r in results if "pathogenic" in (r.get("acmg_classification") or "").lower())
         logger.info(
-            "classify-variants: %d in → %d out, %d pathogenic, ClinVar=%s",
-            len(variants_in), len(results), pathogenic_n, "yes" if clinvar_ann else "no",
+            "classify-variants: %d in → %d out, %d pathogenic, ClinVar=%s, HGMD=%s",
+            len(variants_in), len(results), pathogenic_n,
+            "yes" if clinvar_ann else "no",
+            "yes" if hgmd_ann else "no",
         )
         return results
 
@@ -1730,9 +1783,8 @@ async def report_genolyx_logo():
         path = os.path.join(template_dir, SGNIPT_LOGO_FILENAME)
         if os.path.isfile(path):
             return FileResponse(path, media_type="image/png")
-    # Fallback: NIPT template tree (dev host path)
+    # Fallback: report_templates
     for fallback in (
-        "/home/sam/GX_Report_html/genolyx_logo.png",
         "/home/ken/gx-daemon/data/report_templates/genolyx_logo.png",
     ):
         if os.path.isfile(fallback):

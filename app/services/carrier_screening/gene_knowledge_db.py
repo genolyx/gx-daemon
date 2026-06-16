@@ -543,6 +543,137 @@ def refresh_gene_knowledge_from_gemini(
     return read_gene_knowledge_full_row(g, db_path), None
 
 
+def fetch_gene_knowledge_from_vcf_files(
+    gene: str,
+    variants: List[Dict],
+    hgmd_vcf: str = "",
+    clinvar_vcf: str = "",
+) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
+    """
+    HGMD + ClinVar VCF 파일에서 유전자 지식을 구성합니다 (AI 불필요).
+    해당 유전자의 변이 목록을 받아 각 파일에서 조회하고 유전자 수준으로 집계합니다.
+
+    Args:
+        gene:       gene symbol (e.g. "FGFR3")
+        variants:   list of {"chrom", "pos", "ref", "alt", ...} dicts from result.json
+        hgmd_vcf:   path to tabix-indexed HGMD VCF (.vcf.gz)
+        clinvar_vcf: path to tabix-indexed ClinVar VCF (.vcf.gz)
+    """
+    from .annotator import ClinVarAnnotator, HGMDAnnotator
+
+    gene_sym = (gene or "").strip().upper()
+    if not gene_sym:
+        return None, "missing gene"
+    if not variants:
+        return None, "no variants provided"
+
+    hgmd_ann     = HGMDAnnotator(hgmd_vcf)     if hgmd_vcf     and os.path.isfile(hgmd_vcf)     else None
+    clinvar_ann  = ClinVarAnnotator(clinvar_vcf) if clinvar_vcf and os.path.isfile(clinvar_vcf) else None
+
+    if not hgmd_ann and not clinvar_ann:
+        return None, "no annotation files available (set HGMD_VCF and/or CLINVAR_VCF)"
+
+    hgmd_hits:    List[Dict] = []
+    clinvar_hits: List[Dict] = []
+
+    for v in variants:
+        chrom = str(v.get("chrom") or "")
+        try:
+            pos = int(v.get("pos") or 0)
+        except (TypeError, ValueError):
+            continue
+        ref = str(v.get("ref") or "")
+        alt = str(v.get("alt") or "")
+        if not (chrom and pos and ref and alt):
+            continue
+
+        if hgmd_ann:
+            hr = hgmd_ann.lookup(chrom, pos, ref, alt)
+            if hr:
+                hgmd_hits.append(hr)
+
+        if clinvar_ann:
+            cr = clinvar_ann.lookup(chrom, pos, ref, alt)
+            if cr:
+                clinvar_hits.append(cr)
+
+    # ── Aggregate HGMD ──────────────────────────────────────────
+    dm_hits  = [h for h in hgmd_hits if h.get("hgmd_class") in ("DM", "DM?")]
+    all_hgmd = hgmd_hits
+
+    def _uniq(seq):
+        seen = set()
+        return [x for x in seq if x and x not in seen and not seen.add(x)]
+
+    diseases_hgmd = _uniq([
+        (h.get("hgmd_disease") or "").replace("_", " ")
+        for h in dm_hits
+    ])
+    pmids_hgmd = _uniq([h.get("hgmd_pmid") or "" for h in dm_hits])
+
+    # ── Aggregate ClinVar ────────────────────────────────────────
+    plp_hits = [
+        c for c in clinvar_hits
+        if "pathogenic" in (c.get("clnsig_primary") or "").lower()
+    ]
+    conditions_cv = _uniq([
+        (c.get("clndn") or "").replace("_", " ")
+        for c in plp_hits
+        if c.get("clndn") and c.get("clndn") not in ("not_provided", "not_specified")
+    ])
+    cv_stars = max((int(c.get("stars") or 0) for c in plp_hits), default=0)
+
+    # ── Build gene knowledge fields ──────────────────────────────
+    all_diseases = _uniq(diseases_hgmd + [d for d in conditions_cv if d not in diseases_hgmd])
+    disorder = ", ".join(all_diseases[:3]) if all_diseases else ""
+
+    evidence_parts: List[str] = []
+    if dm_hits:
+        evidence_parts.append(
+            f"HGMD: {len(dm_hits)} disease-causing variant(s) "
+            f"(DM: {sum(1 for h in dm_hits if h.get('hgmd_class')=='DM')}, "
+            f"DM?: {sum(1 for h in dm_hits if h.get('hgmd_class')=='DM?')})"
+        )
+    if plp_hits:
+        star_str = f" ★{'★' * (cv_stars - 1)}" if cv_stars else ""
+        evidence_parts.append(
+            f"ClinVar: {len(plp_hits)} P/LP variant(s){star_str}"
+        )
+    disease_association = "; ".join(evidence_parts) if evidence_parts else (
+        "No pathogenic entries found in HGMD or ClinVar for the observed variants."
+    )
+
+    # function_summary: structured summary of known associations
+    fs_parts: List[str] = []
+    if all_diseases:
+        fs_parts.append(f"Associated with: {', '.join(all_diseases[:5])}.")
+    if pmids_hgmd:
+        fs_parts.append(f"Key HGMD references (PMID): {', '.join(pmids_hgmd[:5])}.")
+    function_summary = " ".join(fs_parts) if fs_parts else ""
+
+    # OMIM / inheritance — prefer from variant data itself
+    omim = ""
+    inheritance = ""
+    for v in variants:
+        if not omim:
+            omim = str(v.get("omim_number") or v.get("omim") or "").replace("OMIM:", "").strip()
+        if not inheritance:
+            inheritance = str(v.get("inheritance") or v.get("expected_inheritance") or "").strip()
+
+    if not all_diseases and not dm_hits and not plp_hits:
+        return None, f"No HGMD/ClinVar hits for {gene_sym} variants"
+
+    row = {
+        "gene_symbol":        gene_sym,
+        "disorder":           disorder,
+        "omim_number":        omim,
+        "inheritance":        inheritance,
+        "disease_association": disease_association,
+        "function_summary":   function_summary,
+    }
+    return row, None
+
+
 def refresh_gene_knowledge(
     gene: str,
     db_path: str,
@@ -551,22 +682,36 @@ def refresh_gene_knowledge(
     api_key: str = "",
     model: str = "",
     ollama_base_url: str = "http://host.docker.internal:11434/v1",
+    # local provider params
+    variants: Optional[List[Dict]] = None,
+    hgmd_vcf: str = "",
+    clinvar_vcf: str = "",
 ) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
     """
-    Unified gene knowledge refresh — routes to Gemini or Ollama/OpenAI-compat.
+    Unified gene knowledge refresh — routes to Gemini, Ollama, or local VCF files.
 
     Args:
-        provider: "gemini" or "ollama"
-        api_key:  Gemini API key (ignored for ollama)
+        provider: "gemini" | "ollama" | "local"
+        api_key:  Gemini API key (ignored for ollama/local)
         model:    model name (e.g. "gemini-2.5-flash" or "qwen2.5:32b")
         ollama_base_url: base URL for Ollama endpoint
+        variants:    list of variant dicts (required for provider="local")
+        hgmd_vcf:    path to HGMD VCF (for provider="local")
+        clinvar_vcf: path to ClinVar VCF (for provider="local")
     """
     g = (gene or "").strip().upper()
     if not g or not db_path:
         return None, "missing gene or db path"
     init_gene_knowledge_database(db_path)
 
-    if provider == "ollama":
+    if provider == "local":
+        flat, err = fetch_gene_knowledge_from_vcf_files(
+            g,
+            variants=variants or [],
+            hgmd_vcf=hgmd_vcf,
+            clinvar_vcf=clinvar_vcf,
+        )
+    elif provider == "ollama":
         effective_model = model or "qwen2.5:32b"
         flat, err = fetch_gene_knowledge_via_openai_compat(
             g, model=effective_model, base_url=ollama_base_url

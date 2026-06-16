@@ -33,7 +33,7 @@ services:
     volumes:
       - ./app:/app/app
       - ./data/report_templates:/app/data/report_templates:ro
-      - ./data/nipt_report_html:/app/data/nipt_report_html:ro
+      - ./data/GX_Report_html:/app/data/GX_Report_html:ro
       - ${BASE_DIR:-/data}:/data
       - ${CARRIER_SCREENING_HOST:-/home/ken/gx-exome}:/data/gx-exome
       - ${CARRIER_SCREENING_HOST:-/home/ken/gx-exome}:${CARRIER_SCREENING_HOST:-/home/ken/gx-exome}

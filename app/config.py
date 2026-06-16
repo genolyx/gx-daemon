@@ -258,7 +258,7 @@ class Settings(BaseSettings):
     )
     nipt_report_template_dir: str = Field(default="/home/ken/gx-daemon/data/templates", alias="REPORT_TEMPLATE_DIR")
     nipt_report_html_template_dir: str = Field(
-        default="/home/ken/gx-daemon/data/nipt_report_html",
+        default="/app/data/GX_Report_html",
         description="Directory containing GX_Report_Template.html and assets for HTML engine",
     )
     nipt_report_sign_dir: str = Field(default="/home/ken/gx-daemon/data/signature", alias="REPORT_SIGNATURE_DIR")
