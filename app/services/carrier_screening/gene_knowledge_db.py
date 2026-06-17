@@ -550,13 +550,16 @@ def fetch_gene_knowledge_from_vcf_files(
     clinvar_vcf: str = "",
 ) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
     """
-    HGMD + ClinVar VCF 파일에서 유전자 지식을 구성합니다 (AI 불필요).
-    해당 유전자의 변이 목록을 받아 각 파일에서 조회하고 유전자 수준으로 집계합니다.
+    Build gene knowledge from HGMD + ClinVar VCF files (no AI required).
+
+    HGMD: full gene-level scan — collects ALL DM/DM? entries for the gene
+          regardless of whether they appear in result.json.
+    ClinVar: position-based lookup using variants from result.json.
 
     Args:
-        gene:       gene symbol (e.g. "FGFR3")
-        variants:   list of {"chrom", "pos", "ref", "alt", ...} dicts from result.json
-        hgmd_vcf:   path to tabix-indexed HGMD VCF (.vcf.gz)
+        gene:        gene symbol (e.g. "FGFR3")
+        variants:    list of {"chrom", "pos", "ref", "alt", ...} dicts from result.json
+        hgmd_vcf:    path to tabix-indexed HGMD VCF (.vcf.gz)
         clinvar_vcf: path to tabix-indexed ClinVar VCF (.vcf.gz)
     """
     from .annotator import ClinVarAnnotator, HGMDAnnotator
@@ -564,114 +567,216 @@ def fetch_gene_knowledge_from_vcf_files(
     gene_sym = (gene or "").strip().upper()
     if not gene_sym:
         return None, "missing gene"
-    if not variants:
-        return None, "no variants provided"
 
-    hgmd_ann     = HGMDAnnotator(hgmd_vcf)     if hgmd_vcf     and os.path.isfile(hgmd_vcf)     else None
-    clinvar_ann  = ClinVarAnnotator(clinvar_vcf) if clinvar_vcf and os.path.isfile(clinvar_vcf) else None
+    hgmd_ann    = HGMDAnnotator(hgmd_vcf)      if hgmd_vcf    and os.path.isfile(hgmd_vcf)    else None
+    clinvar_ann = ClinVarAnnotator(clinvar_vcf) if clinvar_vcf and os.path.isfile(clinvar_vcf) else None
 
     if not hgmd_ann and not clinvar_ann:
         return None, "no annotation files available (set HGMD_VCF and/or CLINVAR_VCF)"
 
-    hgmd_hits:    List[Dict] = []
-    clinvar_hits: List[Dict] = []
+    def _uniq(seq):
+        seen: set = set()
+        return [x for x in seq if x and x not in seen and not seen.add(x)]
 
-    for v in variants:
-        chrom = str(v.get("chrom") or "")
+    # ── HGMD: full gene scan (all known DM/DM? entries) ─────────
+    hgmd_hits: List[Dict] = []
+    if hgmd_ann and os.path.isfile(hgmd_vcf):
         try:
-            pos = int(v.get("pos") or 0)
-        except (TypeError, ValueError):
-            continue
-        ref = str(v.get("ref") or "")
-        alt = str(v.get("alt") or "")
-        if not (chrom and pos and ref and alt):
-            continue
+            import pysam as _pysam
+            vf = _pysam.VariantFile(hgmd_vcf)
+            for rec in vf.fetch():
+                info = rec.info
+                g_raw = info.get("GENE", "")
+                g = g_raw if isinstance(g_raw, str) else (g_raw[0] if g_raw else "")
+                if g.upper() != gene_sym:
+                    continue
+                cls_raw  = info.get("CLASS",   "")
+                dis_raw  = info.get("DISEASE", "")
+                pmid_raw = info.get("PMID",    "")
+                hgvsc_raw= info.get("HGVSC",   "")
+                hgmdid   = info.get("HGMDID",  "")
+                cls  = cls_raw  if isinstance(cls_raw,  str) else (cls_raw[0]  if cls_raw  else "")
+                dis  = dis_raw  if isinstance(dis_raw,  str) else (dis_raw[0]  if dis_raw  else "")
+                pmid = pmid_raw if isinstance(pmid_raw, str) else (pmid_raw[0] if pmid_raw else "")
+                hgvsc= hgvsc_raw if isinstance(hgvsc_raw,str) else (hgvsc_raw[0] if hgvsc_raw else "")
+                hgmdid_s = hgmdid if isinstance(hgmdid, str) else (hgmdid[0] if hgmdid else "")
+                # Limit PMIDs to 5
+                pmids = [p.strip() for p in pmid.split(",") if p.strip()]
+                hgmd_hits.append({
+                    "hgmd_class":   cls,
+                    "hgmd_disease": dis,
+                    "hgmd_pmid":    ",".join(pmids[:5]),
+                    "hgmd_hgvsc":   hgvsc,
+                    "hgmd_id":      hgmdid_s,
+                })
+            vf.close()
+        except Exception as e:
+            logger.debug("HGMD gene scan error for %s: %s", gene_sym, e)
 
-        if hgmd_ann:
-            hr = hgmd_ann.lookup(chrom, pos, ref, alt)
-            if hr:
-                hgmd_hits.append(hr)
+    dm_hits = [h for h in hgmd_hits if h.get("hgmd_class") in ("DM", "DM?")]
+    # Sort: confirmed DM first, then DM?
+    dm_hits.sort(key=lambda h: (0 if h.get("hgmd_class") == "DM" else 1))
 
-        if clinvar_ann:
+    # ── ClinVar: position lookup for variants in result.json ─────
+    clinvar_hits: List[Dict] = []
+    if clinvar_ann and variants:
+        for v in variants:
+            chrom = str(v.get("chrom") or "")
+            try:
+                pos = int(v.get("pos") or 0)
+            except (TypeError, ValueError):
+                continue
+            ref = str(v.get("ref") or "")
+            alt = str(v.get("alt") or "")
+            if not (chrom and pos and ref and alt):
+                continue
             cr = clinvar_ann.lookup(chrom, pos, ref, alt)
             if cr:
                 clinvar_hits.append(cr)
 
-    # ── Aggregate HGMD ──────────────────────────────────────────
-    dm_hits  = [h for h in hgmd_hits if h.get("hgmd_class") in ("DM", "DM?")]
-    all_hgmd = hgmd_hits
+    # ── Aggregate diseases ───────────────────────────────────────
+    _SKIP = {"not_provided", "not_specified", "not provided", "not specified"}
 
-    def _uniq(seq):
-        seen = set()
-        return [x for x in seq if x and x not in seen and not seen.add(x)]
+    def _clean_disease(raw: str) -> List[str]:
+        """Split ClinVar '|'-separated CLNDN, strip underscores, drop junk."""
+        parts = []
+        for p in raw.replace("_", " ").split("|"):
+            p = p.strip()
+            if p and p.lower() not in _SKIP:
+                parts.append(p)
+        return parts
 
-    diseases_hgmd = _uniq([
-        (h.get("hgmd_disease") or "").replace("_", " ")
-        for h in dm_hits
+    # Separate confirmed DM from probable DM?
+    dm_confirmed = [h for h in dm_hits if h.get("hgmd_class") == "DM"]
+    dm_probable  = [h for h in dm_hits if h.get("hgmd_class") == "DM?"]
+
+    diseases_dm = _uniq([
+        h.get("hgmd_disease", "").replace("_", " ").strip()
+        for h in dm_confirmed
+        if h.get("hgmd_disease", "").strip().lower() not in _SKIP
     ])
-    pmids_hgmd = _uniq([h.get("hgmd_pmid") or "" for h in dm_hits])
+    diseases_dm_q = _uniq([
+        h.get("hgmd_disease", "").replace("_", " ").strip()
+        for h in dm_probable
+        if h.get("hgmd_disease", "").strip().lower() not in _SKIP
+    ])
+    diseases_hgmd = _uniq(diseases_dm + [d for d in diseases_dm_q if d not in diseases_dm])
 
-    # ── Aggregate ClinVar ────────────────────────────────────────
     plp_hits = [
         c for c in clinvar_hits
         if "pathogenic" in (c.get("clnsig_primary") or "").lower()
     ]
-    conditions_cv = _uniq([
-        (c.get("clndn") or "").replace("_", " ")
-        for c in plp_hits
-        if c.get("clndn") and c.get("clndn") not in ("not_provided", "not_specified")
-    ])
+    conditions_cv: List[str] = []
+    for c in plp_hits:
+        for d in _clean_disease(c.get("clndn") or ""):
+            if d not in conditions_cv:
+                conditions_cv.append(d)
+
     cv_stars = max((int(c.get("stars") or 0) for c in plp_hits), default=0)
 
-    # ── Build gene knowledge fields ──────────────────────────────
     all_diseases = _uniq(diseases_hgmd + [d for d in conditions_cv if d not in diseases_hgmd])
-    disorder = ", ".join(all_diseases[:3]) if all_diseases else ""
+    disorder = ", ".join(all_diseases[:5]) if all_diseases else ""
 
+    # ── Evidence summary ─────────────────────────────────────────
     evidence_parts: List[str] = []
     if dm_hits:
         evidence_parts.append(
             f"HGMD: {len(dm_hits)} disease-causing variant(s) "
-            f"(DM: {sum(1 for h in dm_hits if h.get('hgmd_class')=='DM')}, "
-            f"DM?: {sum(1 for h in dm_hits if h.get('hgmd_class')=='DM?')})"
+            f"(DM: {len(dm_confirmed)}, DM?: {len(dm_probable)})"
         )
     if plp_hits:
-        star_str = f" ★{'★' * (cv_stars - 1)}" if cv_stars else ""
+        stars_str = " " + "★" * cv_stars if cv_stars else ""
         evidence_parts.append(
-            f"ClinVar: {len(plp_hits)} P/LP variant(s){star_str}"
+            f"ClinVar: {len(plp_hits)} P/LP variant(s){stars_str}"
         )
     disease_association = "; ".join(evidence_parts) if evidence_parts else (
-        "No pathogenic entries found in HGMD or ClinVar for the observed variants."
+        "No pathogenic entries found in HGMD or ClinVar for this gene."
     )
 
-    # function_summary: structured summary of known associations
+    # PMIDs: confirmed DM first, then DM?, deduplicated, max 5
+    all_pmids: List[str] = []
+    for h in dm_confirmed + dm_probable:
+        for p in (h.get("hgmd_pmid") or "").split(","):
+            p = p.strip()
+            if p and p not in all_pmids:
+                all_pmids.append(p)
+    all_pmids = all_pmids[:5]
+
     fs_parts: List[str] = []
-    if all_diseases:
-        fs_parts.append(f"Associated with: {', '.join(all_diseases[:5])}.")
-    if pmids_hgmd:
-        fs_parts.append(f"Key HGMD references (PMID): {', '.join(pmids_hgmd[:5])}.")
+    if diseases_dm:
+        fs_parts.append(f"HGMD (DM — confirmed): {', '.join(diseases_dm[:5])}.")
+    if diseases_dm_q:
+        fs_parts.append(f"HGMD (DM? — probable): {', '.join(diseases_dm_q[:5])}.")
+    if conditions_cv:
+        fs_parts.append(f"ClinVar P/LP: {', '.join(conditions_cv[:5])}.")
+    if all_pmids:
+        fs_parts.append(f"Key HGMD references (PMID): {', '.join(all_pmids)}.")
     function_summary = " ".join(fs_parts) if fs_parts else ""
 
-    # OMIM / inheritance — prefer from variant data itself
+    # inheritance / OMIM from variant data
     omim = ""
     inheritance = ""
-    for v in variants:
+    for v in (variants or []):
         if not omim:
             omim = str(v.get("omim_number") or v.get("omim") or "").replace("OMIM:", "").strip()
         if not inheritance:
             inheritance = str(v.get("inheritance") or v.get("expected_inheritance") or "").strip()
 
     if not all_diseases and not dm_hits and not plp_hits:
-        return None, f"No HGMD/ClinVar hits for {gene_sym} variants"
+        return None, f"No HGMD/ClinVar hits found for gene {gene_sym}"
 
     row = {
-        "gene_symbol":        gene_sym,
-        "disorder":           disorder,
-        "omim_number":        omim,
-        "inheritance":        inheritance,
+        "gene_symbol":         gene_sym,
+        "disorder":            disorder,
+        "omim_number":         omim,
+        "inheritance":         inheritance,
         "disease_association": disease_association,
-        "function_summary":   function_summary,
+        "function_summary":    function_summary,
     }
     return row, None
+
+
+def _get_hgmd_pmids_for_gene(gene: str, hgmd_vcf: str, max_pmids: int = 5) -> List[str]:
+    """
+    Scan HGMD VCF for all DM/DM? entries for the given gene.
+    Returns up to max_pmids unique PMIDs, confirmed DM PMIDs first.
+    """
+    if not hgmd_vcf or not os.path.isfile(hgmd_vcf):
+        return []
+    gene_sym = gene.strip().upper()
+    dm_pmids: List[str] = []
+    dmq_pmids: List[str] = []
+    try:
+        import pysam as _pysam
+        vf = _pysam.VariantFile(hgmd_vcf)
+        for rec in vf.fetch():
+            info = rec.info
+            g_raw = info.get("GENE", "")
+            g = g_raw if isinstance(g_raw, str) else (g_raw[0] if g_raw else "")
+            if g.upper() != gene_sym:
+                continue
+            cls_raw  = info.get("CLASS", "")
+            pmid_raw = info.get("PMID",  "")
+            cls  = cls_raw  if isinstance(cls_raw,  str) else (cls_raw[0]  if cls_raw  else "")
+            pmid = pmid_raw if isinstance(pmid_raw, str) else (pmid_raw[0] if pmid_raw else "")
+            for p in pmid.split(","):
+                p = p.strip()
+                if not p:
+                    continue
+                if cls == "DM":
+                    if p not in dm_pmids:
+                        dm_pmids.append(p)
+                elif cls == "DM?":
+                    if p not in dmq_pmids:
+                        dmq_pmids.append(p)
+        vf.close()
+    except Exception as e:
+        logger.debug("HGMD PMID scan error for %s: %s", gene_sym, e)
+    combined: List[str] = []
+    for p in dm_pmids + dmq_pmids:
+        if p not in combined:
+            combined.append(p)
+    return combined[:max_pmids]
 
 
 def refresh_gene_knowledge(
@@ -689,6 +794,8 @@ def refresh_gene_knowledge(
 ) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
     """
     Unified gene knowledge refresh — routes to Gemini, Ollama, or local VCF files.
+    For Gemini/Ollama providers, HGMD PMIDs are automatically appended to the
+    AI-generated function_summary when hgmd_vcf is provided.
 
     Args:
         provider: "gemini" | "ollama" | "local"
@@ -696,7 +803,7 @@ def refresh_gene_knowledge(
         model:    model name (e.g. "gemini-2.5-flash" or "qwen2.5:32b")
         ollama_base_url: base URL for Ollama endpoint
         variants:    list of variant dicts (required for provider="local")
-        hgmd_vcf:    path to HGMD VCF (for provider="local")
+        hgmd_vcf:    path to HGMD VCF — used for PMID enrichment (all providers)
         clinvar_vcf: path to ClinVar VCF (for provider="local")
     """
     g = (gene or "").strip().upper()
@@ -724,6 +831,15 @@ def refresh_gene_knowledge(
 
     if not flat:
         return read_gene_knowledge_full_row(g, db_path), err
+
+    # ── Append HGMD PMIDs for Gemini/Ollama results ──────────────
+    if provider in ("gemini", "ollama") and hgmd_vcf:
+        pmids = _get_hgmd_pmids_for_gene(g, hgmd_vcf)
+        if pmids:
+            existing = (flat.get("function_summary") or "").rstrip()
+            flat["function_summary"] = (
+                existing + f"\n\nHGMD References (PMID): {', '.join(pmids)}."
+            )
 
     upsert_gene_data(
         db_path,

@@ -883,11 +883,18 @@ def _compute_order_gene_knowledge(
                 provider="ollama",
                 model=ai_ollama_model,
                 ollama_base_url=ai_ollama_base_url,
+                hgmd_vcf=hgmd_vcf,
             )
             if gerr:
                 gemini_fetch_error = gerr
         elif force_refresh and gemini_key:
-            row, gerr = refresh_gene_knowledge_from_gemini(gene, db_path, gemini_key, model=model)
+            row, gerr = refresh_gene_knowledge(
+                gene, db_path,
+                provider="gemini",
+                api_key=gemini_key,
+                model=model,
+                hgmd_vcf=hgmd_vcf,
+            )
             if gerr:
                 gemini_fetch_error = gerr
         elif allow_gemini:
