@@ -836,10 +836,10 @@ def refresh_gene_knowledge(
     if provider in ("gemini", "ollama") and hgmd_vcf:
         pmids = _get_hgmd_pmids_for_gene(g, hgmd_vcf)
         if pmids:
-            existing = (flat.get("function_summary") or "").rstrip()
-            flat["function_summary"] = (
-                existing + f"\n\nHGMD References (PMID): {', '.join(pmids)}."
-            )
+            pmid_line = f"\n\nReferences (PMID): {', '.join(pmids)}."
+            # Append to disease_association (rendered last in UI) so PMIDs appear at the bottom
+            existing_da = (flat.get("disease_association") or "").rstrip()
+            flat["disease_association"] = existing_da + pmid_line
 
     upsert_gene_data(
         db_path,
