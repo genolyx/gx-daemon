@@ -597,11 +597,16 @@ def fetch_gene_knowledge_from_vcf_files(
                 hgmdid   = info.get("HGMDID",  "")
                 cls  = cls_raw  if isinstance(cls_raw,  str) else (cls_raw[0]  if cls_raw  else "")
                 dis  = dis_raw  if isinstance(dis_raw,  str) else (dis_raw[0]  if dis_raw  else "")
-                pmid = pmid_raw if isinstance(pmid_raw, str) else (pmid_raw[0] if pmid_raw else "")
                 hgvsc= hgvsc_raw if isinstance(hgvsc_raw,str) else (hgvsc_raw[0] if hgvsc_raw else "")
                 hgmdid_s = hgmdid if isinstance(hgmdid, str) else (hgmdid[0] if hgmdid else "")
-                # Limit PMIDs to 5
-                pmids = [p.strip() for p in pmid.split(",") if p.strip()]
+                # pysam returns INFO tuples — flatten all elements and filter '.' nulls
+                if isinstance(pmid_raw, str):
+                    pmid_parts = pmid_raw.split(",")
+                else:
+                    pmid_parts = []
+                    for item in (pmid_raw or []):
+                        pmid_parts.extend(str(item).split(","))
+                pmids = [p.strip() for p in pmid_parts if p.strip() and p.strip() != "."]
                 hgmd_hits.append({
                     "hgmd_class":   cls,
                     "hgmd_disease": dis,
@@ -757,11 +762,17 @@ def _get_hgmd_pmids_for_gene(gene: str, hgmd_vcf: str, max_pmids: int = 5) -> Li
                 continue
             cls_raw  = info.get("CLASS", "")
             pmid_raw = info.get("PMID",  "")
-            cls  = cls_raw  if isinstance(cls_raw,  str) else (cls_raw[0]  if cls_raw  else "")
-            pmid = pmid_raw if isinstance(pmid_raw, str) else (pmid_raw[0] if pmid_raw else "")
-            for p in pmid.split(","):
+            cls = cls_raw if isinstance(cls_raw, str) else (cls_raw[0] if cls_raw else "")
+            # pysam returns INFO tuples — flatten all elements and split on comma
+            if isinstance(pmid_raw, str):
+                pmid_parts = pmid_raw.split(",")
+            else:
+                pmid_parts = []
+                for item in (pmid_raw or []):
+                    pmid_parts.extend(str(item).split(","))
+            for p in pmid_parts:
                 p = p.strip()
-                if not p:
+                if not p or p == ".":
                     continue
                 if cls == "DM":
                     if p not in dm_pmids:
@@ -890,6 +901,36 @@ def get_or_fetch_gene_diseases(
     return diseases_from_gene_knowledge_sqlite(gene, db_path)
 
 
+def _fetch_inheritance_from_gemini(gene: str, gemini_api_key: str, model: str) -> str:
+    """
+    Targeted Gemini query to get inheritance pattern when DB entry is missing it.
+    Returns a short code like 'AD', 'AR', 'XL', or empty string on failure.
+    """
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=gemini_api_key)
+        prompt = (
+            f"What is the inheritance pattern of the human disease gene {gene}? "
+            f"Reply with only a JSON object, no markdown: "
+            f'{{\"inheritance\": \"<one of: AD, AR, XL, XLD, XLR, MT, or unknown>\"}}'
+        )
+        gm = genai.GenerativeModel(model)
+        resp = gm.generate_content(prompt)
+        text = (resp.text or "").strip()
+        # strip markdown code fences if present
+        text = text.strip("`").strip()
+        if text.startswith("json"):
+            text = text[4:].strip()
+        import json as _json
+        data = _json.loads(text)
+        inh = str(data.get("inheritance") or "").strip()
+        if inh and inh.lower() != "unknown":
+            return inh
+    except Exception as e:
+        logger.debug("Gemini inheritance query failed for %s: %s", gene, e)
+    return ""
+
+
 def enrich_confirmed_variants_for_report(
     variants: List[Dict[str, Any]],
     *,
@@ -943,6 +984,20 @@ def enrich_confirmed_variants_for_report(
         if not has_panel:
             nv["diseases"] = gk
         inh = (gk[0].get("inheritance") or "").strip()
+        if not has_inh and not inh and allow_gemini and gemini_api_key:
+            # DB has no inheritance — targeted Gemini query for just the inheritance field
+            inh = _fetch_inheritance_from_gemini(gene, gemini_api_key, model)
+            if inh:
+                logger.info("[gene_knowledge] Filled missing inheritance for %s: %s", gene, inh)
+                # Persist back to DB so future reports don't need to re-query
+                try:
+                    with sqlite3.connect(gene_knowledge_db) as _conn:
+                        _conn.execute(
+                            "UPDATE gene_data SET inheritance = ? WHERE gene_symbol = ? AND (inheritance IS NULL OR inheritance = '')",
+                            (inh, gene),
+                        )
+                except Exception as _e:
+                    logger.debug("Failed to persist inheritance for %s: %s", gene, _e)
         if not has_inh and inh:
             nv["inheritance"] = inh
         out.append(nv)

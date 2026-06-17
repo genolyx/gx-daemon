@@ -678,6 +678,48 @@ class CarrierScreeningPlugin(ServicePlugin):
         job.output_dir = dirs["output"]
         job.log_dir = dirs["log"]
 
+        # ── BAM CSV simulation mode: parse CSV → extract this sample's BAM ──
+        input_bam_csv = (job.params or {}).get("input_bam_csv", "").strip()
+        if input_bam_csv:
+            if not os.path.isfile(input_bam_csv):
+                raise RuntimeError(
+                    f"[carrier_screening] input_bam_csv not found: {input_bam_csv}"
+                )
+            import csv as _csv
+            bam_from_csv = None
+            sample_key = (job.sample_name or job.order_id or "").strip()
+            try:
+                with open(input_bam_csv, newline="") as _f:
+                    for row in _csv.DictReader(_f):
+                        sid = (row.get("sample_id") or row.get("sample") or "").strip()
+                        if sid == sample_key or not bam_from_csv:
+                            bam_from_csv = (row.get("bam") or "").strip()
+                            if sid == sample_key:
+                                break
+            except Exception as e:
+                raise RuntimeError(
+                    f"[carrier_screening] Failed to read input_bam_csv {input_bam_csv}: {e}"
+                ) from e
+            if not bam_from_csv:
+                raise RuntimeError(
+                    f"[carrier_screening] Sample '{sample_key}' not found in {input_bam_csv}"
+                )
+            accessible = self._daemon_accessible_path(bam_from_csv)
+            if not os.path.isfile(accessible):
+                raise RuntimeError(
+                    f"[carrier_screening] BAM from CSV not found: {bam_from_csv} "
+                    f"(checked: {accessible})"
+                )
+            p = dict(job.params or {})
+            p["input_bam"] = bam_from_csv
+            p.pop("input_bam_csv", None)
+            job.params = p
+            logger.info(
+                "[carrier_screening] BAM CSV simulation mode — sample=%s bam=%s",
+                sample_key, bam_from_csv,
+            )
+            return True
+
         # ── BAM direct input mode: skip FASTQ entirely ──────────────────
         input_bam = (job.params or {}).get("input_bam", "").strip()
         if input_bam:
@@ -1118,6 +1160,7 @@ class CarrierScreeningPlugin(ServicePlugin):
         carrier_params = (job.params or {}).get("carrier") or {}
         capture_panel = (carrier_params.get("capture_panel_id") or "").strip() or "twist-exome2"
         input_bam = (job.params or {}).get("input_bam", "").strip()
+        input_bam_csv = (job.params or {}).get("input_bam_csv", "").strip()
 
         # Prior-reuse Force Run: use the original FASTQ folder directly instead of creating
         # symlinks. The fastq_dir stored on the job points to the prior order's FASTQ tree;
@@ -1141,7 +1184,7 @@ class CarrierScreeningPlugin(ServicePlugin):
         # FASTQ가 예상 위치({data_dir}/fastq/{work}/{order_id}/)에 없으면 심볼릭 링크 생성.
         # 같은 fastq/ 트리 내의 상대 링크이므로 docker DinD 마운트에서도 정상 작동.
         fastq_dir = os.path.join(data_dir, "fastq", work_arg, sample_folder)
-        if not input_bam:
+        if not input_bam and not input_bam_csv:
             self._ensure_fastq_symlinks(job, fastq_dir)
 
             if not os.path.isdir(fastq_dir):
@@ -1175,11 +1218,13 @@ class CarrierScreeningPlugin(ServicePlugin):
 
         is_fresh = bool((job.params or {}).get("_pipeline_fresh"))
         logger.info(
-            "[carrier_screening] _shell_command_run_analysis: order=%s sample=%s panel=%s bed=%s bam=%s fresh=%s",
+            "[carrier_screening] _shell_command_run_analysis: order=%s sample=%s panel=%s bed=%s bam=%s bam_csv=%s fresh=%s",
             job.order_id, sample_folder, capture_panel, bed_path or "(--panel fallback)",
-            input_bam or "(FASTQ mode)", is_fresh,
+            input_bam or "(none)", input_bam_csv or "(none)", is_fresh,
         )
-        if input_bam:
+        if input_bam_csv:
+            parts += ["--input-bam", input_bam_csv]
+        elif input_bam:
             parts += ["--input-bam", input_bam]
         if is_fresh:
             parts.append("--fresh")
@@ -1338,7 +1383,6 @@ class CarrierScreeningPlugin(ServicePlugin):
             # Verify FASTQ files actually exist for this sample before attempting a full re-run.
             # Prior-reuse orders reuse another order's VCF and may not have their own FASTQs.
             # Check the sample-name-based fastq path that run_analysis.sh will actually use.
-            from .layout_norm import carrier_run_analysis_work_arg
             work_root = settings.carrier_screening_layout_base
             wk = carrier_run_analysis_work_arg(job)
             leaf = carrier_sequencing_folder(job)

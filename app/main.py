@@ -111,7 +111,17 @@ def _is_csv_filename(name: str) -> bool:
 
 def _bam_csv_root_for_service(service_code: Optional[str]) -> str:
     sc = (service_code or "").strip().lower().replace("-", "_")
-    if sc in ("carrier_screening", "whole_exome", "health_screening"):
+    if sc in ("carrier_screening", "whole_exome", "health_screening", "extended_services"):
+        # Prefer host-mapped paths (so the UI shows host-side paths directly)
+        candidates = [
+            "/home/ken/gx-exome/data",
+            "/data/gx-exome/data",
+            settings.get_carrier_screening_data_dir(),
+        ]
+        for candidate in candidates:
+            if candidate and os.path.isdir(candidate):
+                return os.path.realpath(candidate)
+        # final fallback: work_root/data
         wr = getattr(settings, "carrier_screening_work_root", None) or settings.base_dir
         return os.path.realpath(os.path.join(wr, "data"))
     data_dir = (getattr(settings, "sgnipt_data_dir", None) or "").strip()
