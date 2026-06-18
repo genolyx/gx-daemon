@@ -18,7 +18,8 @@ RUN set -eux; \
       bash ca-certificates curl gnupg tzdata procps \
       openjdk-21-jre-headless \
       libglib2.0-0 libpango-1.0-0 libpangocairo-1.0-0 \
-      libcairo2 libffi8 libfontconfig1 fonts-liberation; \
+      libcairo2 libffi8 libfontconfig1 fonts-liberation \
+      fonts-noto-cjk fonts-noto-cjk-extra; \
     install -m 0755 -d /etc/apt/keyrings; \
     curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg; \
     chmod a+r /etc/apt/keyrings/docker.gpg; \

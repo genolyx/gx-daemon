@@ -2370,7 +2370,7 @@ class CarrierScreeningPlugin(ServicePlugin):
                 generate_report_json,
                 generate_report_pdf,
                 carrier_report_template_kind,
-                report_languages_from_order,
+                resolve_report_languages,
                 _carrier_order_flat,
             )
             from .review import extract_qc_summary
@@ -2386,17 +2386,19 @@ class CarrierScreeningPlugin(ServicePlugin):
 
             raw_params = job.params or {}
             kind = carrier_report_template_kind(raw_params)
-            langs = report_languages_from_order(raw_params)
+            languages = resolve_report_languages(
+                order_params=raw_params,
+                request_languages=languages,
+                default=settings.report_language_list,
+            )
             params = _carrier_order_flat(raw_params)
-            if kind is None or langs is None:
+            if kind is None or not languages:
                 raise RuntimeError(
                     "Cannot determine PDF template or languages for this order "
-                    f"({job.order_id}): kind={kind!r}, langs={langs!r}. "
+                    f"({job.order_id}): kind={kind!r}, langs={languages!r}. "
                     "Ensure package_code / wes_panel_id match a supported PDF type (carrier, couples, "
                     "whole exome, proactive, PGx) and report_language is EN, CN, or KO."
                 )
-
-            languages = langs
 
             # Solo PDFs: carrier / exome / proactive / pgx — 파트너 섹션 없음
             # CouplesCarrier: carrier_couples_<lang>.html — patient2_* 또는 폼 partner

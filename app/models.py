@@ -415,6 +415,7 @@ class ReportGenerateResponse(BaseModel):
 
 class GeneKnowledgeSaveRequest(BaseModel):
     gene: str = Field(...)
+    lang: str = Field(default="EN")
     function_summary: str = Field(default="")
     disease_association: str = Field(default="")
     disorder: str = Field(default="")
@@ -424,6 +425,7 @@ class GeneKnowledgeSaveRequest(BaseModel):
 
 class VariantKnowledgeSaveRequest(BaseModel):
     variant_key: str = Field(...)
+    lang: str = Field(default="EN")
     variant_notes: str = Field(default="")
 
 

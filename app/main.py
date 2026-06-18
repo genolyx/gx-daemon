@@ -748,15 +748,27 @@ def _list_order_bam_tracks(job: Job, cap: int = 32) -> List[Dict[str, Any]]:
 # ── Gene knowledge helpers ─────────────────────────────────────
 
 def _load_result_dict_for_gene_knowledge(order_id: str, job) -> Optional[Dict[str, Any]]:
-    result_json_path = None
-    if getattr(job, "service_code", None) in _CARRIER_LIKE:
+    """Load result.json for any service (carrier-like, sgNIPT, NIPT, etc.)."""
+    candidates: List[str] = []
+    sc = (getattr(job, "service_code", None) or "").strip()
+    if sc in _CARRIER_LIKE:
         from .services.carrier_screening.plugin import carrier_result_json_path
-        result_json_path = carrier_result_json_path(job)
-    elif job.output_dir:
-        result_json_path = os.path.join(job.output_dir, "result.json")
-    if result_json_path and os.path.isfile(result_json_path):
-        with open(result_json_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        candidates.append(carrier_result_json_path(job))
+    if getattr(job, "output_dir", None):
+        candidates.append(os.path.join(job.output_dir, "result.json"))
+    if getattr(job, "analysis_dir", None):
+        candidates.append(os.path.join(job.analysis_dir, "result.json"))
+    seen: set = set()
+    for result_json_path in candidates:
+        if not result_json_path:
+            continue
+        norm = os.path.normpath(os.path.abspath(result_json_path))
+        if norm in seen:
+            continue
+        seen.add(norm)
+        if os.path.isfile(norm):
+            with open(norm, "r", encoding="utf-8") as f:
+                return json.load(f)
     store = get_queue_manager().store
     if store:
         return store.get_result_json(order_id)
@@ -789,6 +801,10 @@ def _extract_order_genes(result_data: Dict[str, Any]) -> set:
         _add_gene(v)
     for v in (result_data.get("all_target_variants") or []):
         _add_gene(v)
+    for v in (result_data.get("findings") or []):
+        _add_gene(v)
+    for v in (result_data.get("confirmed_variants") or []):
+        _add_gene(v)
 
     genes.discard("")
     return genes
@@ -798,9 +814,11 @@ def _compute_order_gene_knowledge(
     order_id: str, job,
     enrich: bool, gene_filter: Optional[str] = None,
     force_refresh: bool = False, genes_csv: Optional[str] = None,
+    lang: str = "EN",
 ) -> Dict[str, Any]:
     from .services.carrier_screening.gene_knowledge_db import (
-        ensure_gene_knowledge_full_text, init_gene_knowledge_database,
+        ensure_gene_knowledge_full_text, ensure_gene_knowledge_locale_row,
+        init_gene_knowledge_database,
         load_variant_knowledge_for_keys, make_variant_key,
         read_gene_knowledge_full_row, refresh_gene_knowledge_from_gemini,
         refresh_gene_knowledge,
@@ -836,6 +854,7 @@ def _compute_order_gene_knowledge(
     gemini_key = (settings.gemini_api_key or "").strip()
     model = getattr(settings, "gene_knowledge_gemini_model", "gemini-2.5-flash")
     allow_gemini = bool(enrich and gemini_key)
+    lang_u = (lang or "EN").strip().upper() or "EN"
 
     # Runtime AI config overrides
     ai_cfg = _get_ai_cfg()
@@ -908,7 +927,15 @@ def _compute_order_gene_knowledge(
             if gerr:
                 gemini_fetch_error = gerr
         elif allow_gemini:
-            row = ensure_gene_knowledge_full_text(gene, db_path, gemini_key, model=model, allow_gemini=True)
+            if lang_u != "EN":
+                row = ensure_gene_knowledge_locale_row(
+                    gene, lang_u, db_path, gemini_key, model=model, allow_gemini=True
+                )
+            else:
+                row = ensure_gene_knowledge_full_text(gene, db_path, gemini_key, model=model, allow_gemini=True)
+        elif lang_u != "EN":
+            from .services.carrier_screening.gene_knowledge_db import read_gene_knowledge_locale_row
+            row = read_gene_knowledge_locale_row(gene, db_path, lang_u)
         else:
             row = read_gene_knowledge_full_row(gene, db_path)
         out[gene] = row if row else {}
@@ -917,6 +944,7 @@ def _compute_order_gene_knowledge(
         "gene_knowledge_db_configured": True, "genes": out, "variants": variants_out,
         "enrich_requested": enrich, "force_refresh": force_refresh,
         "gemini_available": bool(gemini_key), "ai_provider": ai_provider,
+        "lang": lang_u,
     }
     if force_refresh and gemini_fetch_error:
         ret["gemini_fetch_error"] = gemini_fetch_error
@@ -945,6 +973,21 @@ def _put_order_gene_knowledge(order_id: str, job, body, genes_csv: Optional[str]
         if gene not in allowed:
             raise HTTPException(status_code=400, detail="Gene not in current selection")
     init_gene_knowledge_database(db_path)
+    lang_u = (body.lang or "EN").strip().upper() or "EN"
+    if lang_u != "EN":
+        from .services.carrier_screening.gene_knowledge_db import (
+            read_gene_knowledge_locale_row, upsert_gene_data_locale,
+        )
+        upsert_gene_data_locale(db_path, {
+            "gene_symbol": gene, "lang": lang_u,
+            "function_summary": body.function_summary or "",
+            "disease_association": body.disease_association or "",
+            "disorder": body.disorder or "",
+            "omim_number": body.omim_number or "",
+            "inheritance": body.inheritance or "",
+        })
+        row = read_gene_knowledge_locale_row(gene, db_path, lang_u)
+        return {"ok": True, "gene": gene, "lang": lang_u, "row": row or {}}
     upsert_gene_data(db_path, {
         "gene_symbol": gene, "function_summary": body.function_summary or "",
         "disease_association": body.disease_association or "", "disorder": body.disorder or "",
@@ -984,6 +1027,16 @@ def _put_order_variant_knowledge(order_id: str, job, body, genes_csv: Optional[s
         if gene not in allowed:
             raise HTTPException(status_code=400, detail="Gene not in current selection")
     init_gene_knowledge_database(db_path)
+    lang_u = (body.lang or "EN").strip().upper() or "EN"
+    if lang_u != "EN":
+        from .services.carrier_screening.gene_knowledge_db import (
+            read_variant_knowledge_locale_row, upsert_variant_knowledge_locale,
+        )
+        upsert_variant_knowledge_locale(db_path, {
+            "variant_key": vk, "lang": lang_u, "variant_notes": body.variant_notes or "",
+        })
+        row = read_variant_knowledge_locale_row(vk, db_path, lang_u)
+        return {"ok": True, "variant_key": vk, "lang": lang_u, "row": row or {}}
     upsert_variant_knowledge(db_path, {
         "variant_key": vk, "gene_symbol": gene,
         "hgvsc": str(matched.get("hgvsc") or ""), "hgvsp": str(matched.get("hgvsp") or ""),
@@ -1902,7 +1955,7 @@ async def preview_report_html(order_id: str, request: ReportGenerateRequest):
 
     from .services.carrier_screening.report import (
         carrier_report_template_kind,
-        report_languages_from_order,
+        resolve_report_languages,
         _carrier_order_flat,
         generate_report_json,
         _render_html_for_language,
@@ -1919,10 +1972,13 @@ async def preview_report_html(order_id: str, request: ReportGenerateRequest):
     kind = carrier_report_template_kind(p_raw)
     if kind is None:
         raise HTTPException(status_code=400, detail="PDF report is not supported for this order type.")
-    langs_obj = report_languages_from_order(p_raw)
-    if langs_obj is None:
+    languages = resolve_report_languages(
+        order_params=p_raw,
+        request_languages=request.languages,
+        default=settings.report_language_list,
+    )
+    if not languages:
         raise HTTPException(status_code=400, detail="Report language must be EN, CN, or KO.")
-    languages = langs_obj if isinstance(langs_obj, list) else [langs_obj]
 
     output_dir = carrier_report_output_dir(job)
     template_dir = resolve_carrier_pdf_template_dir()
@@ -1992,9 +2048,27 @@ async def preview_report_html(order_id: str, request: ReportGenerateRequest):
         sanitize_pgx_payload_for_pdf_render(report_data)
 
         is_couple = report_data.get("report_metadata", {}).get("is_couple", False)
+        gk_path = (settings.gene_knowledge_db or "").strip()
         result = {}
         for lang in languages:
-            html_content = _render_html_for_language(report_data, lang, template_dir, is_couple)
+            lang_u = (lang or "EN").strip().upper() or "EN"
+            render_data = report_data
+            if lang_u != "EN" and gk_path:
+                try:
+                    from .services.carrier_screening.gene_knowledge_db import (
+                        localize_report_data_for_language,
+                    )
+                    render_data = localize_report_data_for_language(
+                        report_data,
+                        lang_u,
+                        gk_path,
+                        gemini_api_key=(settings.gemini_api_key or "").strip(),
+                        model=getattr(settings, "gene_knowledge_gemini_model", "gemini-2.5-flash"),
+                        allow_gemini=bool((settings.gemini_api_key or "").strip()),
+                    )
+                except Exception as loc_err:
+                    logger.warning("Preview %s localization skipped: %s", lang_u, loc_err)
+            html_content = _render_html_for_language(render_data, lang_u, template_dir, is_couple)
             pdf_kind = report_data.get("report_metadata", {}).get("pdf_template_kind")
             stem = carrier_pdf_jinja_stem(pdf_kind, is_couple)
             result[lang] = {
@@ -2861,13 +2935,16 @@ async def get_order_gene_knowledge(
     gene: Optional[str] = Query(None, description="Single gene symbol filter"),
     force: bool = Query(False, description="Always re-run Gemini for the selected gene(s)"),
     genes: Optional[str] = Query(None, description="Comma-separated gene symbols to include"),
+    lang: str = Query("EN", description="Report narrative language: EN, CN, or KO"),
 ):
     """Gene-level text from the gene_knowledge SQLite cache."""
     qm = get_queue_manager()
     job = qm.get_job(order_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Order not found: {order_id}")
-    return await asyncio.to_thread(_compute_order_gene_knowledge, order_id, job, enrich, gene, force, genes)
+    return await asyncio.to_thread(
+        _compute_order_gene_knowledge, order_id, job, enrich, gene, force, genes, lang
+    )
 
 
 @app.put("/order/{order_id}/gene-knowledge")

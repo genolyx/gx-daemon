@@ -236,6 +236,18 @@ def _enrich_confirmed_variant(
                 v.setdefault("disorder", v.get("disorder") or row.get("disorder") or "")
                 v.setdefault("inheritance", row.get("inheritance") or "")
                 v.setdefault("omim_number", row.get("omim_number") or "")
+                if not (v.get("report_gene_description") or "").strip():
+                    from .carrier_screening.gene_knowledge_db import (
+                        build_localized_gene_description,
+                    )
+                    disorder = (
+                        (v.get("disorder") or v.get("disease") or row.get("disorder") or "")
+                        .strip()
+                        or "Unknown disorder"
+                    )
+                    desc = build_localized_gene_description(gene, disorder, row, "EN")
+                    if desc:
+                        v["report_gene_description"] = desc
         except Exception as e:
             logger.debug("[sgnipt_report] gene_knowledge enrichment failed for %s: %s", gene, e)
 

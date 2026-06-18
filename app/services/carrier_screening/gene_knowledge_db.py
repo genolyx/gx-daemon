@@ -13,11 +13,53 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from datetime import datetime, timezone
 import sqlite3
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+_PV_EN_PREFIX_RE = re.compile(
+    r"^pathogenic\s+variants?\s+in\s+(?:the\s+)?[\w.]+\s+gene\b",
+    re.IGNORECASE,
+)
+
+
+def normalize_disease_association(gene: str, text: str, lang: str = "EN") -> str:
+    """
+    Ensure English disease_association opens with
+    ``Pathogenic variants in the {gene} gene``.
+    """
+    g = (gene or "gene").strip()
+    t = (text or "").strip()
+    if not t:
+        return ""
+    lang_u = (lang or "EN").strip().upper()
+    if lang_u != "EN":
+        return t
+    prefix = f"Pathogenic variants in the {g} gene"
+    if t.lower().startswith(prefix.lower()):
+        return t
+    if _PV_EN_PREFIX_RE.match(t):
+        rest = _PV_EN_PREFIX_RE.sub("", t).lstrip(" ,.-")
+        if not rest:
+            return f"{prefix}."
+        joiner = " " if rest[0].islower() else ". "
+        return f"{prefix}{joiner}{rest}"
+    joiner = " " if t[0].islower() else ". "
+    return f"{prefix}{joiner}{t}"
+
+
+def _normalize_gene_knowledge_row(row: Optional[Dict[str, str]], lang: str = "EN") -> Optional[Dict[str, str]]:
+    if not row:
+        return row
+    out = dict(row)
+    gene = (out.get("gene_symbol") or "").strip()
+    da = (out.get("disease_association") or "").strip()
+    if da:
+        out["disease_association"] = normalize_disease_association(gene, da, lang)
+    return out
 
 
 def init_gene_knowledge_database(db_path: str) -> None:
@@ -52,6 +94,32 @@ def init_gene_knowledge_database(db_path: str) -> None:
                 hgvsp TEXT,
                 variant_notes TEXT,
                 updated_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS gene_data_locale (
+                gene_symbol TEXT NOT NULL,
+                lang TEXT NOT NULL,
+                function_summary TEXT,
+                disease_association TEXT,
+                disorder TEXT,
+                inheritance TEXT,
+                omim_number TEXT,
+                updated_at TEXT,
+                PRIMARY KEY (gene_symbol, lang)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS variant_knowledge_locale (
+                variant_key TEXT NOT NULL,
+                lang TEXT NOT NULL,
+                variant_notes TEXT,
+                updated_at TEXT,
+                PRIMARY KEY (variant_key, lang)
             )
             """
         )
@@ -99,14 +167,406 @@ def read_gene_knowledge_full_row(gene: str, db_path: str) -> Optional[Dict[str, 
     if not row:
         return None
     omim = (row["omim_number"] or "").strip().replace("OMIM:", "")
-    return {
+    return _normalize_gene_knowledge_row({
         "gene_symbol": (row["gene_symbol"] or g).strip().upper(),
         "function_summary": (row["function_summary"] or "").strip(),
         "disease_association": (row["disease_association"] or "").strip(),
         "omim_number": omim,
         "inheritance": (row["inheritance"] or "").strip(),
         "disorder": (row["disorder"] or "").strip(),
+    })
+
+
+def read_gene_knowledge_locale_row(
+    gene: str, db_path: str, lang: str
+) -> Optional[Dict[str, str]]:
+    """Localized gene narrative (CN/KO) from ``gene_data_locale``."""
+    if not gene or not db_path or not os.path.isfile(db_path):
+        return None
+    lang_u = (lang or "EN").strip().upper()
+    if lang_u == "EN":
+        return None
+    g = gene.strip().upper()
+    init_gene_knowledge_database(db_path)
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.execute(
+                """
+                SELECT gene_symbol, lang, function_summary, disease_association,
+                       omim_number, inheritance, disorder, updated_at
+                FROM gene_data_locale WHERE gene_symbol = ? AND lang = ?
+                """,
+                (g, lang_u),
+            )
+            row = cur.fetchone()
+    except Exception as e:
+        logger.debug("gene_data_locale read failed: %s", e)
+        return None
+    if not row:
+        return None
+    omim = (row["omim_number"] or "").strip().replace("OMIM:", "")
+    return _normalize_gene_knowledge_row({
+        "gene_symbol": (row["gene_symbol"] or g).strip().upper(),
+        "lang": lang_u,
+        "function_summary": (row["function_summary"] or "").strip(),
+        "disease_association": (row["disease_association"] or "").strip(),
+        "omim_number": omim,
+        "inheritance": (row["inheritance"] or "").strip(),
+        "disorder": (row["disorder"] or "").strip(),
+        "updated_at": (row["updated_at"] or "").strip(),
+    }, lang_u)
+
+
+def upsert_gene_data_locale(db_path: str, row: Dict[str, str]) -> None:
+    init_gene_knowledge_database(db_path)
+    gene_symbol = (row.get("gene_symbol") or "").strip().upper()
+    lang = (row.get("lang") or "").strip().upper()
+    if not gene_symbol or not lang or lang == "EN":
+        return
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO gene_data_locale
+            (gene_symbol, lang, function_summary, disease_association, disorder,
+             inheritance, omim_number, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                gene_symbol,
+                lang,
+                (row.get("function_summary") or "").strip(),
+                (row.get("disease_association") or "").strip(),
+                (row.get("disorder") or "").strip(),
+                (row.get("inheritance") or "").strip(),
+                (row.get("omim_number") or "").strip(),
+                ts,
+            ),
+        )
+        conn.commit()
+
+
+def read_variant_knowledge_locale_row(
+    variant_key: str, db_path: str, lang: str
+) -> Optional[Dict[str, str]]:
+    if not variant_key or not db_path or not os.path.isfile(db_path):
+        return None
+    lang_u = (lang or "EN").strip().upper()
+    if lang_u == "EN":
+        return None
+    init_gene_knowledge_database(db_path)
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.execute(
+                """
+                SELECT variant_key, lang, variant_notes, updated_at
+                FROM variant_knowledge_locale WHERE variant_key = ? AND lang = ?
+                """,
+                (variant_key.strip(), lang_u),
+            )
+            row = cur.fetchone()
+    except Exception as e:
+        logger.debug("variant_knowledge_locale read failed: %s", e)
+        return None
+    if not row:
+        return None
+    return {
+        "variant_key": (row["variant_key"] or "").strip(),
+        "lang": lang_u,
+        "variant_notes": (row["variant_notes"] or "").strip(),
+        "updated_at": (row["updated_at"] or "").strip(),
     }
+
+
+def upsert_variant_knowledge_locale(db_path: str, row: Dict[str, str]) -> None:
+    init_gene_knowledge_database(db_path)
+    vk = (row.get("variant_key") or "").strip()
+    lang = (row.get("lang") or "").strip().upper()
+    if not vk or not lang or lang == "EN":
+        return
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO variant_knowledge_locale
+            (variant_key, lang, variant_notes, updated_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (vk, lang, (row.get("variant_notes") or "").strip(), ts),
+        )
+        conn.commit()
+
+
+_LOCALE_STYLE: Dict[str, str] = {
+    "CN": "Traditional Chinese (繁體中文, Hong Kong clinical genetics style)",
+    "KO": "Korean (clinical genetics style)",
+}
+
+
+def _locale_row_has_narrative(row: Optional[Dict[str, str]]) -> bool:
+    if not row:
+        return False
+    return bool(
+        (row.get("function_summary") or "").strip()
+        or (row.get("disease_association") or "").strip()
+    )
+
+
+def translate_gene_fields_via_gemini(
+    fields: Dict[str, str],
+    target_lang: str,
+    api_key: str,
+    model: str = "gemini-2.5-flash",
+) -> Optional[Dict[str, str]]:
+    """Translate gene narrative fields to CN/KO; returns flat dict or None."""
+    lang_u = (target_lang or "").strip().upper()
+    if lang_u not in _LOCALE_STYLE or not (api_key or "").strip():
+        return None
+    payload = {
+        k: (fields.get(k) or "").strip()
+        for k in ("function_summary", "disease_association", "disorder", "inheritance")
+        if (fields.get(k) or "").strip()
+    }
+    if not payload:
+        return None
+    try:
+        from google import genai
+        from pydantic import BaseModel, Field
+    except ImportError:
+        return None
+
+    class GeneLocaleFields(BaseModel):
+        function_summary: str = Field(default="")
+        disease_association: str = Field(default="")
+        disorder: str = Field(default="")
+        inheritance: str = Field(default="")
+
+    client = genai.Client(api_key=api_key)
+    import json as _json
+
+    prompt = (
+        f"Translate the following clinical genetics text to {_LOCALE_STYLE[lang_u]}. "
+        "Preserve gene symbols, HGVS, OMIM numbers, PMID numbers, and variant nomenclature in Latin characters. "
+        "Return JSON only with keys: function_summary, disease_association, disorder, inheritance.\n\n"
+        f"SOURCE JSON:\n{_json.dumps(payload, ensure_ascii=False)}"
+    )
+    try:
+        response = client.models.generate_content(
+            model=model,
+            contents=prompt,
+            config={
+                "response_mime_type": "application/json",
+                "response_schema": GeneLocaleFields,
+            },
+        )
+        parsed = response.parsed
+        if not parsed:
+            return None
+        return {
+            "function_summary": (getattr(parsed, "function_summary", None) or "").strip(),
+            "disease_association": (getattr(parsed, "disease_association", None) or "").strip(),
+            "disorder": (getattr(parsed, "disorder_name", None) or getattr(parsed, "disorder", None) or "").strip(),
+            "inheritance": (getattr(parsed, "inheritance", None) or "").strip(),
+        }
+    except Exception as e:
+        logger.warning("translate_gene_fields_via_gemini failed (%s): %s", lang_u, e)
+        return None
+
+
+def translate_clinical_paragraph_via_gemini(
+    text: str,
+    target_lang: str,
+    api_key: str,
+    model: str = "gemini-2.5-flash",
+) -> str:
+    """Translate a variant interpretation paragraph; returns original text on failure."""
+    lang_u = (target_lang or "").strip().upper()
+    src = (text or "").strip()
+    if not src or lang_u not in _LOCALE_STYLE or not (api_key or "").strip():
+        return src
+    try:
+        from google import genai
+
+        client = genai.Client(api_key=api_key)
+        prompt = (
+            f"Translate this clinical genetics variant interpretation to {_LOCALE_STYLE[lang_u]}. "
+            "Keep gene symbols, HGVS, protein changes, and classification terms accurate. "
+            "Return only the translated paragraph, no markdown.\n\n"
+            f"{src}"
+        )
+        response = client.models.generate_content(model=model, contents=prompt)
+        out = (response.text or "").strip()
+        return out or src
+    except Exception as e:
+        logger.warning("translate_clinical_paragraph_via_gemini failed: %s", e)
+        return src
+
+
+def ensure_gene_knowledge_locale_row(
+    gene: str,
+    lang: str,
+    db_path: str,
+    api_key: str = "",
+    model: str = "gemini-2.5-flash",
+    *,
+    allow_gemini: bool = True,
+) -> Optional[Dict[str, str]]:
+    """
+    Return localized gene narrative for ``lang`` (CN/KO). Uses cache; on miss, translates
+    English ``gene_data`` via Gemini and upserts ``gene_data_locale``.
+    """
+    lang_u = (lang or "EN").strip().upper()
+    if lang_u == "EN":
+        return read_gene_knowledge_full_row(gene, db_path)
+    g = (gene or "").strip().upper()
+    if not g or not db_path:
+        return None
+    init_gene_knowledge_database(db_path)
+    cached = read_gene_knowledge_locale_row(g, db_path, lang_u)
+    if _locale_row_has_narrative(cached):
+        return cached
+    en_row = read_gene_knowledge_full_row(g, db_path) or {}
+    if not _locale_row_has_narrative(en_row) and allow_gemini and (api_key or "").strip():
+        en_row = ensure_gene_knowledge_full_text(
+            g, db_path, api_key, model=model, allow_gemini=True
+        ) or en_row
+    if not _locale_row_has_narrative(en_row):
+        return cached
+    if not allow_gemini or not (api_key or "").strip():
+        return cached
+    translated = translate_gene_fields_via_gemini(en_row, lang_u, api_key, model=model)
+    if not translated:
+        return cached
+    upsert_gene_data_locale(
+        db_path,
+        {
+            "gene_symbol": g,
+            "lang": lang_u,
+            "function_summary": translated.get("function_summary") or "",
+            "disease_association": translated.get("disease_association") or "",
+            "disorder": translated.get("disorder") or en_row.get("disorder") or "",
+            "inheritance": translated.get("inheritance") or en_row.get("inheritance") or "",
+            "omim_number": en_row.get("omim_number") or "",
+        },
+    )
+    return read_gene_knowledge_locale_row(g, db_path, lang_u)
+
+
+def build_localized_gene_description(
+    gene: str,
+    disorder: str,
+    locale_row: Optional[Dict[str, str]],
+    lang: str,
+) -> str:
+    """Paragraph for PDF ``gene_description`` in the target language."""
+    lang_u = (lang or "EN").strip().upper()
+    g = (gene or "gene").strip()
+    dis = (disorder or "").strip() or "Unknown disorder"
+    row = locale_row or {}
+    fs = (row.get("function_summary") or "").strip()
+    da_raw = (row.get("disease_association") or "").strip()
+    da = normalize_disease_association(g, da_raw, lang_u) if lang_u == "EN" else da_raw
+    if lang_u == "EN":
+        parts = []
+        if fs:
+            parts.append(fs)
+        if da:
+            parts.append(da)
+        if parts:
+            return "\n\n".join(parts)
+        if dis != "Unknown disorder":
+            return normalize_disease_association(
+                g, f"are associated with {dis}.", "EN"
+            )
+        return ""
+    if lang_u == "CN":
+        dis_cn = (row.get("disorder") or "").strip() or dis
+        lead = f"{g} 基因與 {dis_cn} 相關。"
+        parts = [lead] if (fs or da) else []
+        if fs:
+            parts.append(fs)
+        if da:
+            parts.append(da)
+        if parts:
+            return "\n\n".join(parts)
+        return lead if dis_cn != "Unknown disorder" else ""
+    parts = []
+    if fs:
+        parts.append(fs)
+    if da:
+        parts.append(da)
+    return "\n\n".join(parts) if parts else ""
+
+
+def build_localized_variant_summary(
+    gene: str,
+    mutation: str,
+    disorder: str,
+    summary_en: str,
+    locale_row: Optional[Dict[str, str]],
+    classification: str,
+    lang: str,
+) -> str:
+    lang_u = (lang or "EN").strip().upper()
+    body = (summary_en or "").strip()
+    if locale_row and (locale_row.get("variant_notes") or "").strip():
+        body = (locale_row.get("variant_notes") or "").strip()
+    g = (gene or "").strip()
+    mut = (mutation or "").strip()
+    dis = (disorder or "").strip()
+    cls = (classification or "").strip()
+    if lang_u == "CN":
+        dis_cn = dis
+        if body:
+            if mut and g:
+                return (
+                    f"在 {g} 基因檢測到 {mut} 變異，與 {dis_cn} 相關。{body}"
+                    + (f" 此變異分類為 {cls}。" if cls else "")
+                )
+            return body + (f" 此變異分類為 {cls}。" if cls and cls not in body else "")
+        if mut and g:
+            return f"在 {g} 基因檢測到 {mut} 變異，與 {dis_cn} 相關。"
+        return body
+    if body:
+        return body
+    return ""
+
+
+def ensure_variant_knowledge_locale_row(
+    variant_key: str,
+    lang: str,
+    summary_en: str,
+    db_path: str,
+    api_key: str = "",
+    model: str = "gemini-2.5-flash",
+    *,
+    allow_gemini: bool = True,
+) -> Optional[Dict[str, str]]:
+    lang_u = (lang or "EN").strip().upper()
+    if lang_u == "EN" or not variant_key:
+        return None
+    cached = read_variant_knowledge_locale_row(variant_key, db_path, lang_u)
+    if cached and (cached.get("variant_notes") or "").strip():
+        return cached
+    src = (summary_en or "").strip()
+    if not src:
+        return cached
+    en_notes = read_variant_knowledge_row(variant_key, db_path)
+    if en_notes and (en_notes.get("variant_notes") or "").strip():
+        src = (en_notes.get("variant_notes") or "").strip()
+    if not allow_gemini or not (api_key or "").strip():
+        return cached
+    translated = translate_clinical_paragraph_via_gemini(src, lang_u, api_key, model=model)
+    if not translated or translated == src:
+        if lang_u == "CN" and cached:
+            return cached
+    upsert_variant_knowledge_locale(
+        db_path,
+        {"variant_key": variant_key, "lang": lang_u, "variant_notes": translated},
+    )
+    return read_variant_knowledge_locale_row(variant_key, db_path, lang_u)
 
 
 def gene_knowledge_row_is_empty(row: Optional[Dict[str, str]]) -> bool:
@@ -260,7 +720,7 @@ def _gene_knowledge_row_from_parsed(parsed: Any, gene_symbol: str) -> Optional[D
         "disorder": disorder,
         "omim_number": omim,
         "inheritance": inh,
-        "disease_association": da,
+        "disease_association": normalize_disease_association(gene_symbol, da, "EN"),
         "function_summary": fs,
     }
 
@@ -270,6 +730,7 @@ def _gene_knowledge_json_prompt(gene_symbol: str) -> Tuple[str, str]:
     system = (
         "You are a genomics expert. Return ONLY a valid JSON object with exactly these keys: "
         "gene_symbol, omim_number, function_summary, disease_association, inheritance, disorder_name. "
+        "disease_association MUST begin with: Pathogenic variants in the {gene} gene. "
         "Keep each value under 2 sentences. No prose, no markdown, no extra keys."
     )
     user = (
@@ -386,7 +847,7 @@ TEXT: {found_text}
 
 Field notes (align with genetic_reporter_lookup gene_data usage):
 - 'disorder_name': Specific name of the primary disorder associated with this gene.
-- 'disease_association': 1–3 sentences on how pathogenic variants in this gene relate to that disorder (clinical/genetic mechanism), not just repeating the disorder name.
+- 'disease_association': 1–3 sentences; MUST start with "Pathogenic variants in the {gene_symbol} gene" then explain clinical/genetic mechanism.
 - 'function_summary': 1–3 sentences on normal gene product function / pathway role.
 - 'inheritance': Pattern if known (e.g. AR, AD, XL).
 - 'omim_number': Digits only when cited in the text.
@@ -415,7 +876,8 @@ Field notes (align with genetic_reporter_lookup gene_data usage):
         fallback_prompt = (
             f"You are a clinical genetics assistant. For gene {gene_symbol}, provide accurate structured fields: "
             "disorder_name (primary disease name), omim_number (digits only if known), inheritance (e.g. AR/AD/XL), "
-            "function_summary (1–3 sentences on gene function), disease_association (1–3 sentences linking gene to disease). "
+            "function_summary (1–3 sentences on gene function), disease_association (1–3 sentences; MUST start with "
+            f'"Pathogenic variants in the {gene_symbol} gene"). '
             "Use established medical knowledge."
         )
         response = client.models.generate_content(
@@ -452,6 +914,9 @@ def upsert_gene_data(db_path: str, row: Dict[str, str]) -> None:
     gene_symbol = (row.get("gene_symbol") or "").strip().upper()
     if not gene_symbol:
         return
+    da = normalize_disease_association(
+        gene_symbol, (row.get("disease_association") or "").strip(), "EN"
+    )
     with sqlite3.connect(db_path) as conn:
         conn.execute(
             """
@@ -462,7 +927,7 @@ def upsert_gene_data(db_path: str, row: Dict[str, str]) -> None:
             (
                 gene_symbol,
                 row.get("function_summary") or "",
-                row.get("disease_association") or "",
+                da,
                 row.get("omim_number") or "",
                 row.get("inheritance") or "",
                 row.get("disorder") or "",
@@ -931,6 +1396,27 @@ def _fetch_inheritance_from_gemini(gene: str, gemini_api_key: str, model: str) -
     return ""
 
 
+def _disorder_label_from_variant(
+    v: Dict[str, Any], gk_row: Optional[Dict[str, str]] = None
+) -> str:
+    for d in v.get("diseases") or []:
+        if isinstance(d, dict):
+            name = (d.get("name") or d.get("disease_name") or "").strip()
+            if name:
+                return name
+        elif isinstance(d, str) and d.strip():
+            return d.strip()
+    for key in ("disorder", "clinvar_dn", "clinvar_disease", "hgmd_disease", "disease"):
+        val = (v.get(key) or "").strip()
+        if val:
+            return val
+    if gk_row:
+        dis = (gk_row.get("disorder") or "").strip()
+        if dis:
+            return dis
+    return "Unknown disorder"
+
+
 def enrich_confirmed_variants_for_report(
     variants: List[Dict[str, Any]],
     *,
@@ -949,6 +1435,7 @@ def enrich_confirmed_variants_for_report(
         return variants
     init_gene_knowledge_database(gene_knowledge_db)
     gene_cache: Dict[str, List[Dict[str, Any]]] = {}
+    full_row_cache: Dict[str, Optional[Dict[str, str]]] = {}
     out: List[Dict[str, Any]] = []
     for v in variants:
         nv = dict(v)
@@ -966,9 +1453,6 @@ def enrich_confirmed_variants_for_report(
                 has_panel = True
                 break
         has_inh = bool((nv.get("inheritance") or "").strip())
-        if has_panel and has_inh:
-            out.append(nv)
-            continue
         if gene not in gene_cache:
             gene_cache[gene] = get_or_fetch_gene_diseases(
                 gene,
@@ -978,12 +1462,9 @@ def enrich_confirmed_variants_for_report(
                 allow_gemini=allow_gemini,
             )
         gk = gene_cache[gene]
-        if not gk:
-            out.append(nv)
-            continue
-        if not has_panel:
+        if not has_panel and gk:
             nv["diseases"] = gk
-        inh = (gk[0].get("inheritance") or "").strip()
+        inh = (gk[0].get("inheritance") or "").strip() if gk else ""
         if not has_inh and not inh and allow_gemini and gemini_api_key:
             # DB has no inheritance — targeted Gemini query for just the inheritance field
             inh = _fetch_inheritance_from_gemini(gene, gemini_api_key, model)
@@ -1000,5 +1481,103 @@ def enrich_confirmed_variants_for_report(
                     logger.debug("Failed to persist inheritance for %s: %s", gene, _e)
         if not has_inh and inh:
             nv["inheritance"] = inh
+
+        if not (nv.get("report_gene_description") or "").strip():
+            if gene not in full_row_cache:
+                full_row_cache[gene] = ensure_gene_knowledge_full_text(
+                    gene,
+                    gene_knowledge_db,
+                    gemini_api_key,
+                    model=model,
+                    allow_gemini=allow_gemini,
+                ) or read_gene_knowledge_full_row(gene, gene_knowledge_db)
+            row = full_row_cache[gene]
+            if row:
+                disorder = _disorder_label_from_variant(nv, row)
+                desc = build_localized_gene_description(gene, disorder, row, "EN")
+                if desc:
+                    nv["report_gene_description"] = desc
         out.append(nv)
     return out
+
+
+def _iter_report_finding_lists(report_data: Dict[str, Any]) -> List[List[Dict[str, Any]]]:
+    out: List[List[Dict[str, Any]]] = []
+    pp = report_data.get("primary_patient") or {}
+    if isinstance(pp.get("findings"), list):
+        out.append(pp["findings"])
+    partner = report_data.get("partner") or {}
+    if isinstance(partner.get("findings"), list):
+        out.append(partner["findings"])
+    if isinstance(report_data.get("findings"), list):
+        out.append(report_data["findings"])
+    return out
+
+
+def localize_report_data_for_language(
+    report_data: Dict[str, Any],
+    lang: str,
+    db_path: str,
+    *,
+    gemini_api_key: str = "",
+    model: str = "gemini-2.5-flash",
+    allow_gemini: bool = True,
+) -> Dict[str, Any]:
+    """
+    Deep-copy report JSON and apply CN/KO gene + variant narratives from ``gene_data_locale``
+    / ``variant_knowledge_locale`` (Gemini translate + cache on miss).
+    """
+    import copy
+
+    lang_u = (lang or "EN").strip().upper()
+    if lang_u == "EN" or not db_path:
+        return report_data
+    data = copy.deepcopy(report_data)
+    gene_cache: Dict[str, Optional[Dict[str, str]]] = {}
+    for findings in _iter_report_finding_lists(data):
+        for item in findings:
+            if not isinstance(item, dict):
+                continue
+            gene = (item.get("gene") or "").strip().upper()
+            if not gene:
+                continue
+            if gene not in gene_cache:
+                gene_cache[gene] = ensure_gene_knowledge_locale_row(
+                    gene,
+                    lang_u,
+                    db_path,
+                    api_key=gemini_api_key,
+                    model=model,
+                    allow_gemini=allow_gemini,
+                )
+            locale_row = gene_cache[gene]
+            disorder = (item.get("disorder") or "").strip()
+            if locale_row and (locale_row.get("disorder") or "").strip():
+                item["disorder"] = locale_row["disorder"]
+            item["gene_description"] = build_localized_gene_description(
+                gene, disorder, locale_row, lang_u
+            ) or item.get("gene_description") or ""
+            mut = (item.get("mutation") or "").strip()
+            if mut.startswith("p.") or ("p." in mut and "c." not in mut.split()[0]):
+                vk = make_variant_key(gene, "", mut)
+            else:
+                vk = make_variant_key(gene, mut, "")
+            var_locale = ensure_variant_knowledge_locale_row(
+                vk,
+                lang_u,
+                (item.get("variant_summary") or "").strip(),
+                db_path,
+                api_key=gemini_api_key,
+                model=model,
+                allow_gemini=allow_gemini,
+            )
+            item["variant_summary"] = build_localized_variant_summary(
+                gene,
+                mut,
+                item.get("disorder") or disorder,
+                (item.get("variant_summary") or "").strip(),
+                var_locale,
+                (item.get("classification") or "").strip(),
+                lang_u,
+            ) or item.get("variant_summary") or ""
+    return data

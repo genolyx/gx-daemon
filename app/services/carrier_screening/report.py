@@ -444,17 +444,61 @@ def carrier_report_template_kind(params: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+_PDF_REPORT_LANGS = frozenset({"EN", "CN", "KO"})
+
+
+def parse_report_languages(raw: Any) -> List[str]:
+    """Normalize EN/CN/KO from a single code, comma-separated string, or list."""
+    if raw is None:
+        return []
+    if isinstance(raw, (list, tuple)):
+        parts = [str(x).strip().upper() for x in raw]
+    else:
+        parts = [
+            s.strip().upper()
+            for s in str(raw).replace(";", ",").split(",")
+            if s.strip()
+        ]
+    out: List[str] = []
+    for code in parts:
+        if code in _PDF_REPORT_LANGS and code not in out:
+            out.append(code)
+    return out
+
+
 def report_languages_from_order(params: Dict[str, Any]) -> Optional[List[str]]:
     """
-    order.params.report_language → 템플릿에 있는 EN/CN/KO 만 허용.
-    ID / Other 등은 템플릿이 없으므로 None.
+    order.params.report_language (or languages) → EN/CN/KO list.
+    Accepts one code, comma-separated values, or a list. Returns None when unset.
     """
     if not params:
         return None
     params = _carrier_order_flat(params)
-    rl = str(params.get("report_language") or "").strip().upper()
-    if rl in ("EN", "CN", "KO"):
-        return [rl]
+    raw = params.get("report_language")
+    if raw is None:
+        raw = params.get("languages")
+    langs = parse_report_languages(raw)
+    return langs if langs else None
+
+
+def resolve_report_languages(
+    order_params: Optional[Dict[str, Any]] = None,
+    request_languages: Optional[List[str]] = None,
+    default: Optional[List[str]] = None,
+) -> Optional[List[str]]:
+    """Request languages override order params; otherwise fall back to default list."""
+    if request_languages:
+        langs = parse_report_languages(request_languages)
+        if langs:
+            return langs
+    if order_params:
+        langs = report_languages_from_order(order_params)
+        if langs:
+            return langs
+    if default:
+        langs = parse_report_languages(default)
+        if langs:
+            return langs
     return None
 
 
@@ -738,7 +782,8 @@ def _variant_to_template_finding(v: Dict[str, Any]) -> Dict[str, Any]:
     auto_summary = rc if rc else (" ".join(parts) if parts else "")
     auto_gene_desc = ""
     if disorder and disorder != "Unknown disorder":
-        auto_gene_desc = f"The {v.get('gene') or 'gene'} gene is associated with {disorder}."
+        gene_name = v.get("gene") or "gene"
+        auto_gene_desc = f"Pathogenic variants in the {gene_name} gene are associated with {disorder}."
     # Portal Generate Report tab: reviewer-edited text wins
     og = (v.get("report_gene_description") or "").strip()
     osum = (v.get("report_variant_summary") or "").strip()
@@ -1376,8 +1421,35 @@ def generate_report_pdf(
 
     for lang in languages:
         try:
+            lang_u = (lang or "EN").strip().upper() or "EN"
+            render_data = report_data
+            gk_db = (template_dir or "").strip()
+            # template_dir is HTML dir; gene DB path comes from settings when localizing narratives
+            if lang_u != "EN":
+                try:
+                    from ...config import settings as _settings
+
+                    gk_path = (_settings.gene_knowledge_db or "").strip()
+                    if gk_path:
+                        from .gene_knowledge_db import localize_report_data_for_language
+
+                        render_data = localize_report_data_for_language(
+                            report_data,
+                            lang_u,
+                            gk_path,
+                            gemini_api_key=(_settings.gemini_api_key or "").strip(),
+                            model=getattr(
+                                _settings, "gene_knowledge_gemini_model", "gemini-2.5-flash"
+                            ),
+                            allow_gemini=bool((_settings.gemini_api_key or "").strip()),
+                        )
+                except Exception as loc_err:
+                    logger.warning(
+                        "Report %s localization skipped: %s", lang_u, loc_err
+                    )
+
             html_content = _render_html_for_language(
-                report_data, lang, template_dir, is_couple
+                render_data, lang_u, template_dir, is_couple
             )
 
             # HTML 저장
