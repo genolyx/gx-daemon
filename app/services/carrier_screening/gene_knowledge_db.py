@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import hashlib
 from datetime import datetime, timezone
 import sqlite3
 from typing import Any, Dict, List, Optional, Tuple
@@ -120,6 +121,18 @@ def init_gene_knowledge_database(db_path: str) -> None:
                 variant_notes TEXT,
                 updated_at TEXT,
                 PRIMARY KEY (variant_key, lang)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pgx_text_locale (
+                cache_key TEXT NOT NULL,
+                lang TEXT NOT NULL,
+                source_text TEXT NOT NULL,
+                translated_text TEXT NOT NULL,
+                updated_at TEXT,
+                PRIMARY KEY (cache_key, lang)
             )
             """
         )
@@ -402,6 +415,177 @@ def translate_clinical_paragraph_via_gemini(
     except Exception as e:
         logger.warning("translate_clinical_paragraph_via_gemini failed: %s", e)
         return src
+
+
+def _pgx_text_cache_key(lang: str, text: str) -> str:
+    lang_u = (lang or "EN").strip().upper()
+    payload = f"{lang_u}\n{(text or '').strip()}".encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def read_pgx_text_locale(cache_key: str, lang: str, db_path: str) -> Optional[str]:
+    if not cache_key or not db_path or not os.path.isfile(db_path):
+        return None
+    lang_u = (lang or "EN").strip().upper()
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.execute(
+                "SELECT translated_text FROM pgx_text_locale WHERE cache_key = ? AND lang = ?",
+                (cache_key, lang_u),
+            )
+            row = cur.fetchone()
+            if row and (row[0] or "").strip():
+                return str(row[0]).strip()
+    except Exception as e:
+        logger.debug("read_pgx_text_locale failed: %s", e)
+    return None
+
+
+def upsert_pgx_text_locale(
+    db_path: str, cache_key: str, lang: str, source_text: str, translated_text: str
+) -> None:
+    if not db_path or not cache_key:
+        return
+    lang_u = (lang or "EN").strip().upper()
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    init_gene_knowledge_database(db_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO pgx_text_locale
+            (cache_key, lang, source_text, translated_text, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (cache_key, lang_u, source_text or "", translated_text or "", ts),
+        )
+        conn.commit()
+
+
+def translate_pgx_narrative_via_gemini(
+    text: str,
+    target_lang: str,
+    api_key: str,
+    model: str = "gemini-2.5-flash",
+) -> str:
+    """Translate PGx clinical narrative; keep drug names and gene symbols in Latin script."""
+    lang_u = (target_lang or "").strip().upper()
+    src = (text or "").strip()
+    if not src or lang_u not in _LOCALE_STYLE or not (api_key or "").strip():
+        return src
+    try:
+        from google import genai
+
+        client = genai.Client(api_key=api_key)
+        prompt = (
+            f"Translate this pharmacogenomics (PGx) clinical text to {_LOCALE_STYLE[lang_u]}. "
+            "Rules:\n"
+            "- Keep ALL drug names in English (e.g. warfarin, codeine, simvastatin, tamoxifen).\n"
+            "- Keep gene symbols, star alleles (*1, *2), diplotypes, rsIDs, CPIC, DPWG, PharmCAT, "
+            "ClinPGx, and evidence levels (1A, 2B, etc.) unchanged.\n"
+            "- Translate phenotypes, clinical implications, recommendations, and allele function "
+            "descriptions into natural clinical language.\n"
+            "Return only the translated text, no markdown.\n\n"
+            f"{src}"
+        )
+        response = client.models.generate_content(model=model, contents=prompt)
+        out = (response.text or "").strip()
+        return out or src
+    except Exception as e:
+        logger.warning("translate_pgx_narrative_via_gemini failed: %s", e)
+        return src
+
+
+def ensure_pgx_narrative_locale(
+    text: str,
+    lang: str,
+    db_path: str,
+    api_key: str = "",
+    model: str = "gemini-2.5-flash",
+    *,
+    allow_gemini: bool = True,
+) -> str:
+    """Cached PGx narrative translation (SQLite + optional Gemini)."""
+    lang_u = (lang or "EN").strip().upper()
+    src = (text or "").strip()
+    if not src or lang_u == "EN":
+        return src
+    cache_key = _pgx_text_cache_key(lang_u, src)
+    if db_path:
+        init_gene_knowledge_database(db_path)
+        cached = read_pgx_text_locale(cache_key, lang_u, db_path)
+        if cached:
+            return cached
+    if not allow_gemini or not (api_key or "").strip():
+        return src
+    translated = translate_pgx_narrative_via_gemini(src, lang_u, api_key, model=model)
+    if translated and translated != src and db_path:
+        upsert_pgx_text_locale(db_path, cache_key, lang_u, src, translated)
+    return translated or src
+
+
+def _dark_genes_text_cache_key(lang: str, text: str) -> str:
+    return "dg:" + _pgx_text_cache_key(lang, text)
+
+
+def translate_dark_genes_clinical_via_gemini(
+    text: str,
+    target_lang: str,
+    api_key: str,
+    model: str = "gemini-2.5-flash",
+) -> str:
+    """Translate supplementary dark-gene clinical text; keep gene symbols and technical tokens."""
+    lang_u = (target_lang or "").upper()
+    src = (text or "").strip()
+    if not src or lang_u not in _LOCALE_STYLE or not (api_key or "").strip():
+        return src
+    try:
+        from google import genai
+
+        client = genai.Client(api_key=api_key)
+        prompt = (
+            f"Translate this supplementary hard-to-sequence / dark-gene clinical genetics "
+            f"text to {_LOCALE_STYLE[lang_u]}. Rules:\n"
+            "- Keep gene symbols (SMN1, SMN2, HBA1, HBA2, CYP21A2, CFTR, FMR1, DMD), "
+            "rsIDs, coordinates, HGVS, copy numbers, ratios, and KEY=value tokens unchanged.\n"
+            "- Keep English pipeline keys when they appear before '=' (e.g. Est_CN, C_Ratio).\n"
+            "- Translate warnings, clinical interpretation, disorder names, and narrative prose.\n"
+            "Return only the translated text, no markdown.\n\n"
+            f"{src}"
+        )
+        response = client.models.generate_content(model=model, contents=prompt)
+        out = (response.text or "").strip()
+        return out or src
+    except Exception as e:
+        logger.warning("translate_dark_genes_clinical_via_gemini failed: %s", e)
+        return src
+
+
+def ensure_dark_genes_narrative_locale(
+    text: str,
+    lang: str,
+    db_path: str,
+    api_key: str = "",
+    model: str = "gemini-2.5-flash",
+    *,
+    allow_gemini: bool = True,
+) -> str:
+    """Cached dark-gene narrative translation (SQLite ``pgx_text_locale`` + optional Gemini)."""
+    lang_u = (lang or "EN").upper()
+    src = (text or "").strip()
+    if not src or lang_u == "EN":
+        return src
+    cache_key = _dark_genes_text_cache_key(lang_u, src)
+    if db_path:
+        init_gene_knowledge_database(db_path)
+        cached = read_pgx_text_locale(cache_key, lang_u, db_path)
+        if cached:
+            return cached
+    if not allow_gemini or not (api_key or "").strip():
+        return src
+    translated = translate_dark_genes_clinical_via_gemini(src, lang_u, api_key, model=model)
+    if translated and translated != src and db_path:
+        upsert_pgx_text_locale(db_path, cache_key, lang_u, src, translated)
+    return translated or src
 
 
 def ensure_gene_knowledge_locale_row(

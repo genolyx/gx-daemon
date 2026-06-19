@@ -114,6 +114,21 @@ def chunk_list(lst, n):
     for i in range(0, len(lst), n):
         yield lst[i:i + n]
 
+def _write_pdf(html_content, pdf_filename):
+    try:
+        import sys
+        if sys.platform == 'darwin':
+            os.environ['DYLD_FALLBACK_LIBRARY_PATH'] = '/opt/homebrew/lib:/usr/local/lib:' + os.environ.get('DYLD_FALLBACK_LIBRARY_PATH', '')
+        from weasyprint import HTML
+        HTML(string=html_content, base_url='.').write_pdf(pdf_filename)
+        print(f"PDF generated: {pdf_filename}")
+        return True
+    except ImportError:
+        return False
+    except Exception as e:
+        print(f"PDF generation failed ({pdf_filename}): {e}")
+        return False
+
 def generate_report(options=None, custom_data=None):
     # Setup Jinja2 Environment
     file_loader = FileSystemLoader('.')
@@ -244,29 +259,12 @@ def generate_report(options=None, custom_data=None):
         total_pages=total_pages
     )
 
-    # Save Output
+    # Save output
     output_filename = 'GX_Report_Sample.html'
     with open(output_filename, 'w', encoding='utf-8') as f:
         f.write(output)
-        
-    # Generate PDF
-    try:
-        import sys
-        import os
-        # MacOS WeasyPrint workaround: ensure Homebrew libs are visible
-        if sys.platform == 'darwin':
-            os.environ['DYLD_FALLBACK_LIBRARY_PATH'] = '/opt/homebrew/lib:/usr/local/lib:' + os.environ.get('DYLD_FALLBACK_LIBRARY_PATH', '')
-            
-        from weasyprint import HTML
-        pdf_filename = 'GX_Report_Sample.pdf'
-        HTML(string=output, base_url='.').write_pdf(pdf_filename)
-        print(f"PDF generated: {pdf_filename}")
-    except ImportError:
-        print("WeasyPrint not installed. PDF generation skipped.")
-    except Exception as e:
-        print(f"PDF generation failed: {e}")
-    
-    # Backward-compatible alias
+    _write_pdf(output, 'GX_Report_Sample.pdf')
+
     try:
         import shutil
         shutil.copy2(output_filename, 'GX_Report_Generated.html')

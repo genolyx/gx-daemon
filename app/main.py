@@ -1595,21 +1595,42 @@ async def get_order_result(order_id: str, force_disk: bool = Query(False)):
 
     store = qm.store
     result_data = None
+    result_json_path = None
 
-    if store and not force_disk:
+    if job.service_code in _CARRIER_LIKE:
+        from app.services.carrier_screening.plugin import carrier_result_json_path
+
+        result_json_path = carrier_result_json_path(job)
+    elif job.output_dir:
+        result_json_path = os.path.join(job.output_dir, "result.json")
+
+    # Carrier-like: disk is source of truth (same file Generate Report reads).
+    if (
+        not force_disk
+        and job.service_code in _CARRIER_LIKE
+        and result_json_path
+        and os.path.isfile(result_json_path)
+    ):
+        with open(result_json_path, "r", encoding="utf-8") as f:
+            result_data = json.load(f)
+        if store and isinstance(result_data, dict):
+            body_oid = (result_data.get("order_id") or "").strip()
+            if body_oid and body_oid != (order_id or "").strip():
+                logger.warning(
+                    "Discarding stale result.json on disk for order %s: embedded order_id=%r",
+                    order_id,
+                    body_oid,
+                )
+                result_data = None
+            else:
+                store.set_result_json(order_id, result_data)
+
+    if result_data is None and store and not force_disk:
         result_data = store.get_result_json(order_id)
 
     if result_data is None:
-        if job.service_code in _CARRIER_LIKE:
-            from app.services.carrier_screening.plugin import carrier_result_json_path
-            path = carrier_result_json_path(job)
-        elif job.output_dir:
-            path = os.path.join(job.output_dir, "result.json")
-        else:
-            path = None
-
-        if path and os.path.isfile(path):
-            with open(path, "r", encoding="utf-8") as f:
+        if result_json_path and os.path.isfile(result_json_path):
+            with open(result_json_path, "r", encoding="utf-8") as f:
                 result_data = json.load(f)
             if store:
                 store.set_result_json(order_id, result_data)
@@ -2027,6 +2048,8 @@ async def preview_report_html(order_id: str, request: ReportGenerateRequest):
             _merge_dark_genes_from_result_json_for_pdf,
             _merge_pgx_from_result_json_for_pdf,
             _strip_supplemental_dark_genes_findings,
+            _ensure_proactive_report_metadata,
+            _strip_apoe_from_report_if_excluded,
             apply_supplemental_dark_genes_findings_to_report_data,
             pdf_template_kind_excludes_dark_genes,
         )
@@ -2046,6 +2069,8 @@ async def preview_report_html(order_id: str, request: ReportGenerateRequest):
             _strip_supplemental_dark_genes_findings(report_data)
         _merge_pgx_from_result_json_for_pdf(report_data, report_json_path, extra_result_json_paths=extras)
         sanitize_pgx_payload_for_pdf_render(report_data)
+        _ensure_proactive_report_metadata(report_data)
+        _strip_apoe_from_report_if_excluded(report_data)
 
         is_couple = report_data.get("report_metadata", {}).get("is_couple", False)
         gk_path = (settings.gene_knowledge_db or "").strip()
@@ -2053,21 +2078,60 @@ async def preview_report_html(order_id: str, request: ReportGenerateRequest):
         for lang in languages:
             lang_u = (lang or "EN").strip().upper() or "EN"
             render_data = report_data
-            if lang_u != "EN" and gk_path:
+            if lang_u != "EN":
+                import copy
+
+                render_data = copy.deepcopy(report_data)
+                gemini_key = (settings.gemini_api_key or "").strip()
+                gemini_model = getattr(settings, "gene_knowledge_gemini_model", "gemini-2.5-flash")
+                if gk_path:
+                    try:
+                        from .services.carrier_screening.gene_knowledge_db import (
+                            localize_report_data_for_language,
+                        )
+                        render_data = localize_report_data_for_language(
+                            render_data,
+                            lang_u,
+                            gk_path,
+                            gemini_api_key=gemini_key,
+                            model=gemini_model,
+                            allow_gemini=bool(gemini_key),
+                        )
+                    except Exception as loc_err:
+                        logger.warning("Preview %s localization skipped: %s", lang_u, loc_err)
                 try:
-                    from .services.carrier_screening.gene_knowledge_db import (
-                        localize_report_data_for_language,
-                    )
-                    render_data = localize_report_data_for_language(
-                        report_data,
+                    from .services.carrier_screening.pgx_report import localize_pgx_for_language
+
+                    render_data = localize_pgx_for_language(
+                        render_data,
                         lang_u,
-                        gk_path,
-                        gemini_api_key=(settings.gemini_api_key or "").strip(),
-                        model=getattr(settings, "gene_knowledge_gemini_model", "gemini-2.5-flash"),
-                        allow_gemini=bool((settings.gemini_api_key or "").strip()),
+                        db_path=gk_path,
+                        gemini_api_key=gemini_key,
+                        model=gemini_model,
+                        allow_gemini=bool(gemini_key),
                     )
-                except Exception as loc_err:
-                    logger.warning("Preview %s localization skipped: %s", lang_u, loc_err)
+                except Exception as pgx_loc_err:
+                    logger.warning("Preview %s PGx localization skipped: %s", lang_u, pgx_loc_err)
+                try:
+                    from .services.carrier_screening.dark_genes import (
+                        localize_dark_genes_for_language,
+                    )
+
+                    render_data = localize_dark_genes_for_language(
+                        render_data,
+                        lang_u,
+                        db_path=gk_path,
+                        gemini_api_key=gemini_key,
+                        model=gemini_model,
+                        allow_gemini=bool(gemini_key),
+                    )
+                except Exception as dg_loc_err:
+                    logger.warning(
+                        "Preview %s dark_genes localization skipped: %s", lang_u, dg_loc_err
+                    )
+                from .services.carrier_screening.report import _strip_apoe_from_report_if_excluded
+
+                _strip_apoe_from_report_if_excluded(render_data)
             html_content = _render_html_for_language(render_data, lang_u, template_dir, is_couple)
             pdf_kind = report_data.get("report_metadata", {}).get("pdf_template_kind")
             stem = carrier_pdf_jinja_stem(pdf_kind, is_couple)
@@ -2248,77 +2312,182 @@ async def platform_generate_report(order_id: str, request: Request):
 # DARK GENES / PGX REVIEW
 # ══════════════════════════════════════════════════════════════
 
-@app.post("/order/{order_id}/dark-genes-review")
-async def save_dark_genes_review(order_id: str, req: DarkGenesReviewRequest = Body(...)):
+async def _dark_genes_review_impl(order_id: str, body: DarkGenesReviewRequest) -> Dict[str, Any]:
+    """
+    Save dark-genes section reviews into the same on-disk ``result.json`` that
+    Generate Report reads (``carrier_report_output_dir``, mirrored to ``job.output_dir``).
+    """
     qm = get_queue_manager()
     job = qm.get_job(order_id)
     if not job:
         raise HTTPException(404, f"Order not found: {order_id}")
+    if job.service_code not in _CARRIER_LIKE:
+        raise HTTPException(
+            status_code=400,
+            detail="dark-genes-review is only supported for carrier_screening, whole_exome, and health_screening",
+        )
+    from app.services.carrier_screening.plugin import (
+        carrier_result_json_path,
+        write_carrier_result_json_sync,
+    )
+
+    path = carrier_result_json_path(job)
+    if not path:
+        raise HTTPException(
+            status_code=404,
+            detail="result.json not found — run analysis / reprocess first",
+        )
+
+    def _apply() -> Dict[str, Any]:
+        from app.services.carrier_screening.dark_genes import (
+            apply_reviewer_section_reviews,
+            ensure_dark_genes_detailed_sections,
+            _coerce_risk_level,
+        )
+
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        data = ensure_dark_genes_detailed_sections(data)
+        dg = data.get("dark_genes")
+        if not isinstance(dg, dict):
+            raise ValueError("result.json has no dark_genes object")
+        sections = dg.get("detailed_sections")
+        if not isinstance(sections, list) or len(sections) == 0:
+            raise ValueError(
+                "No detailed_sections — reprocess results so dark_genes has supplementary content."
+            )
+        n = len(sections)
+        incoming = []
+        for x in body.section_reviews:
+            item = {
+                "approved": bool(x.approved),
+                "notes": (x.notes or "")[:8000],
+            }
+            if x.risk is not None:
+                item["risk"] = _coerce_risk_level(x.risk)
+            incoming.append(item)
+        dg2 = dict(dg)
+        dg2["section_reviews"] = apply_reviewer_section_reviews(incoming, n, sections)
+        data["dark_genes"] = dg2
+        write_carrier_result_json_sync(job, data)
+        return data
+
+    try:
+        data = await asyncio.to_thread(_apply)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     store = qm.store
-    if not store:
-        raise HTTPException(500, "No persistence store")
+    if store and isinstance(data, dict):
+        await asyncio.to_thread(store.set_result_json, order_id, data)
 
-    result_data = store.get_result_json(order_id)
-    if not result_data:
-        raise HTTPException(404, "result.json not found in store")
+    dg_out = data.get("dark_genes") if isinstance(data, dict) else {}
+    return {
+        "status": "ok",
+        "order_id": order_id,
+        "dark_genes": dg_out if isinstance(dg_out, dict) else {},
+    }
 
-    dg = result_data.get("dark_genes") or {}
-    dg["section_reviews"] = [r.model_dump() for r in req.section_reviews]
-    result_data["dark_genes"] = dg
 
-    store.set_result_json(order_id, result_data)
-    return {"status": "saved", "order_id": order_id}
+async def _pgx_review_impl(order_id: str, body: PgxReviewRequest) -> Dict[str, Any]:
+    """
+    Save PGx ✓ Include selections into the same on-disk ``result.json`` that
+    Generate Report reads (``carrier_report_output_dir``, mirrored to ``job.output_dir``).
+    """
+    qm = get_queue_manager()
+    job = qm.get_job(order_id)
+    if not job:
+        raise HTTPException(404, f"Order not found: {order_id}")
+    if job.service_code not in _CARRIER_LIKE:
+        raise HTTPException(
+            status_code=400,
+            detail="pgx-review is only supported for carrier_screening, whole_exome, and health_screening",
+        )
+    from app.services.carrier_screening.plugin import (
+        carrier_result_json_path,
+        write_carrier_result_json_sync,
+    )
+
+    path = carrier_result_json_path(job)
+    if not path:
+        raise HTTPException(
+            status_code=404,
+            detail="result.json not found — run analysis / reprocess first",
+        )
+
+    def _apply() -> Dict[str, Any]:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            data = {}
+        pgx = data.get("pgx")
+        if not isinstance(pgx, dict):
+            pgx = {"status": "not_found", "message": "PGx block was missing; created by portal save"}
+        pgx2 = dict(pgx)
+        prev_pr = pgx2.get("portal_review") if isinstance(pgx2.get("portal_review"), dict) else {}
+        pgx2["portal_review"] = {
+            **prev_pr,
+            "reviewer_notes": (body.reviewer_notes or "")[:16000],
+            "reviewed": bool(body.reviewed),
+            "include_apoe_proactive_pdf": bool(body.include_apoe_proactive_pdf),
+            "inclusions_saved": True,
+        }
+        grs = pgx2.get("gene_results")
+        if isinstance(grs, list) and body.gene_reviews is not None:
+            by_gene = {x.gene: x for x in body.gene_reviews}
+            new_grs = []
+            for row in grs:
+                if not isinstance(row, dict):
+                    continue
+                r = dict(row)
+                g = r.get("gene")
+                if g in by_gene:
+                    u = by_gene[g]
+                    r["reviewer_confirmed"] = bool(u.reviewer_confirmed)
+                    r["reviewer_comment"] = (u.reviewer_comment or "")[:4000]
+                new_grs.append(r)
+            pgx2["gene_results"] = new_grs
+        cgrs = pgx2.get("custom_gene_results")
+        if isinstance(cgrs, list) and body.custom_gene_reviews is not None:
+            by_key = {(x.gene, x.rsid): x for x in body.custom_gene_reviews}
+            new_cgrs = []
+            for row in cgrs:
+                if not isinstance(row, dict):
+                    continue
+                r = dict(row)
+                key = (r.get("gene", ""), r.get("rsid", ""))
+                if key in by_key:
+                    u = by_key[key]
+                    r["reviewer_confirmed"] = bool(u.reviewer_confirmed)
+                    r["reviewer_comment"] = (u.reviewer_comment or "")[:4000]
+                new_cgrs.append(r)
+            pgx2["custom_gene_results"] = new_cgrs
+        data["pgx"] = pgx2
+        write_carrier_result_json_sync(job, data)
+        return data
+
+    data = await asyncio.to_thread(_apply)
+
+    store = qm.store
+    if store and isinstance(data, dict):
+        await asyncio.to_thread(store.set_result_json, order_id, data)
+
+    pgx_out = data.get("pgx") if isinstance(data, dict) else {}
+    return {
+        "status": "ok",
+        "order_id": order_id,
+        "pgx": pgx_out if isinstance(pgx_out, dict) else {},
+    }
+
+
+@app.post("/order/{order_id}/dark-genes-review")
+async def save_dark_genes_review(order_id: str, req: DarkGenesReviewRequest = Body(...)):
+    return await _dark_genes_review_impl(order_id, req)
 
 
 @app.post("/order/{order_id}/pgx-review")
 async def save_pgx_review(order_id: str, req: PgxReviewRequest = Body(...)):
-    qm = get_queue_manager()
-    job = qm.get_job(order_id)
-    if not job:
-        raise HTTPException(404, f"Order not found: {order_id}")
-
-    store = qm.store
-    if not store:
-        raise HTTPException(500, "No persistence store")
-
-    result_data = store.get_result_json(order_id)
-    if not result_data:
-        raise HTTPException(404, "result.json not found in store")
-
-    pgx = result_data.get("pgx") or {}
-    prev_pr = pgx.get("portal_review") if isinstance(pgx.get("portal_review"), dict) else {}
-    pgx["portal_review"] = {
-        **prev_pr,
-        "reviewer_notes": (req.reviewer_notes or "")[:16000],
-        "reviewed": bool(req.reviewed),
-        "include_apoe_proactive_pdf": bool(req.include_apoe_proactive_pdf),
-    }
-
-    gene_results = pgx.get("gene_results") or []
-    review_map = {r.gene: r for r in req.gene_reviews}
-    for gr in gene_results:
-        gene = gr.get("gene", "")
-        if gene in review_map:
-            rv = review_map[gene]
-            gr["reviewer_confirmed"] = rv.reviewer_confirmed
-            gr["reviewer_comment"] = rv.reviewer_comment
-
-    custom_results = pgx.get("custom_gene_results") or []
-    custom_map = {(r.gene, r.rsid): r for r in req.custom_gene_reviews}
-    for cr in custom_results:
-        key = (cr.get("gene", ""), cr.get("rsid", ""))
-        if key in custom_map:
-            u = custom_map[key]
-            cr["reviewer_confirmed"] = bool(u.reviewer_confirmed)
-            cr["reviewer_comment"] = (u.reviewer_comment or "")[:4000]
-
-    pgx["gene_results"] = gene_results
-    pgx["custom_gene_results"] = custom_results
-    result_data["pgx"] = pgx
-
-    store.set_result_json(order_id, result_data)
-    return {"status": "saved", "order_id": order_id}
+    return await _pgx_review_impl(order_id, req)
 
 
 

@@ -140,6 +140,7 @@ class Settings(BaseSettings):
     curated_variants_db: Optional[str] = Field(default=None)
     disease_db_dir: Optional[str] = Field(default=None)
     disease_gene_json: Optional[str] = Field(default=None)
+    proactive_gene_disease_json: Optional[str] = Field(default=None)
     gene_knowledge_db: Optional[str] = Field(default=None)
     gene_knowledge_db_fallback_path: Optional[str] = Field(default=None)
     gene_knowledge_enrich_on_report: bool = Field(default=True)

@@ -131,7 +131,68 @@
         .drug-rec-table tr:nth-child(even) { background: #f8f9fa; }
         .drug-name { font-weight: 600; text-transform: capitalize; }
         .rec-text { font-size: 7pt; line-height: 1.3; }
-    </style>
+        .appendix-dual-table tbody td {
+            padding: 3pt 5px;
+            font-size: 8pt;
+            line-height: 1.35;
+            border-bottom: none;
+            vertical-align: top;
+        }
+        .appendix-dual-table thead th {
+            background: #f1f5f9;
+            color: #475569;
+            font-size: 7pt;
+            padding: 4px 5px;
+            font-weight: 600;
+        }
+        .appendix-dual-table td.gene-col { width: 11%; font-weight: 600; color: #0f172a; white-space: nowrap; }
+        .appendix-dual-table td.cond-col { width: 39%; color: #475569; }
+        .appendix-dual-table td.split-col { border-left: 1px solid #e8ecf0; }
+        .appendix-row-even { background: #ffffff; }
+        .appendix-row-odd { background: #f8fafc; }
+        .appendix-section-page { page-break-before: always; }
+        .appendix-section-header {
+            font-size: 10pt;
+            font-weight: 600;
+            color: #0f172a;
+            padding: 6px 10px;
+            margin-bottom: 8px;
+            border-radius: 0 4px 4px 0;
+        }
+        .appendix-cat-icon {
+            display: inline-block;
+            width: 8pt;
+            height: 8pt;
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 7pt;
+            line-height: 8pt;
+            text-align: center;
+            vertical-align: middle;
+            margin-right: 1px;
+        }
+        .appendix-cat-icon-cancer { font-size: 5.5pt; }
+        .appendix-cat-cancer.appendix-section-header { background: #fff1f2; border-left: 4px solid #be123c; }
+        .appendix-cat-cardio.appendix-section-header { background: #eff6ff; border-left: 4px solid #2563eb; }
+        .appendix-cat-other.appendix-section-header { background: #f0fdfa; border-left: 4px solid #0d9488; }
+        .appendix-cat-pgx.appendix-section-header { background: #f5f3ff; border-left: 4px solid #7c3aed; }
+        .appendix-cat-icon-pgx {
+            font-size: 0;
+            line-height: 0;
+            width: 9pt;
+            height: 5pt;
+            border: 0.7pt solid #7c3aed;
+            border-radius: 2.5pt;
+            background: linear-gradient(90deg, #7c3aed 0%, #7c3aed 46%, #ede9fe 54%, #ede9fe 100%);
+            box-sizing: border-box;
+            vertical-align: middle;
+        }
+        .appendix-summary-line { font-size: 7.5pt; color: #64748b; margin: 0 0 4px 0; line-height: 1.3; }
+            .gene-transcript-table { width:100%; border-collapse:collapse; font-size:7.5pt; margin-top:8px; table-layout:fixed; }
+        .gene-transcript-table th { background:#f1f5f9; color:#475569; font-weight:700; font-size:7pt; text-transform:uppercase; letter-spacing:.04em; padding:4px 6px; border:1px solid #e2e8f0; }
+        .gene-transcript-table td { padding:3px 6px; border:1px solid #e2e8f0; color:#334155; vertical-align:top; }
+        .gene-transcript-table td.gene-col { font-weight:600; }
+        .gene-transcript-table td.tx-col { font-family:monospace; color:#64748b; }
+        </style>
 </head>
 <body>
 
@@ -193,29 +254,6 @@
         </div>
     </div>
 </div>
-
-<p class="text-muted" style="font-size:8.5pt;margin:0 0 12px;padding:0 4px;">
-    해석 대상 유전자 수: <strong>{{ data.genes_evaluated_count }}</strong> (주문 패널 기준)
-</p>
-{% if data.interpretation_genes and data.interpretation_genes | length > 0 %}
-<p style="font-size:8pt;color:#94a3b8;line-height:1.75;text-align:justify;margin:0 0 12px;padding:0 4px;">
-    {{ data.interpretation_genes | join(', ') }}
-</p>
-{% endif %}
-{% set _rm_pgx_gl = data.report_metadata if data.report_metadata else {} %}
-{% set _inc_pgx_gl = _rm_pgx_gl.get('include_pgx', true) %}
-{% if _inc_pgx_gl and data.pgx and data.pgx.genes_evaluated and data.pgx.genes_evaluated | length > 0 %}
-{% set pgx_ev = data.pgx.genes_evaluated %}
-<div style="margin-top:4px;padding-top:12px;border-top:1px solid #e9ecef;">
-    <p style="font-size:8.5pt;font-weight:600;color:#2c3e50;margin:0 0 6px;padding:0 4px;">약물유전체(PGx) 분석 대상 유전자</p>
-    <p style="font-size:8pt;color:#334155;margin:0 0 8px;line-height:1.4;padding:0 4px;">
-        본 보고서 약물유전체 해석 범위는 <strong>{{ pgx_ev | length }}</strong>개 유전자이며, 아래에는 분석 결과가 있는 <strong>{{ pgx_ev | length }}</strong>개 유전자 기호가 나열됩니다. PharmCAT(CPIC/DPWG) 및/또는 Curated(ClinPGx) 유전자형 분석을 포함합니다.
-    </p>
-    <p style="font-size:8pt;color:#94a3b8;line-height:1.8;text-align:justify;margin:0;padding:0 4px 12px;">
-        {{ pgx_ev | join(', ') }}
-    </p>
-</div>
-{% endif %}
 
 {% set status = data.carrier_status.status | default('negative') %}
 <div class="status-section {{ status }}">
@@ -337,7 +375,8 @@
 {% endif %}
 
 {% set _rm = data.report_metadata if data.report_metadata else {} %}
-{% set _inc_pgx = _rm.get('include_pgx', true) %}
+{# Proactive PDFs always render PGx when data.pgx is present (legacy include_pgx=false ignored). #}
+{% set _inc_pgx = true %}
 {% set _inc_apoe_order = _rm.get('include_apoe_on_proactive_pdf', false) %}
 
 {% if _inc_pgx and data.pgx %}
@@ -493,11 +532,50 @@
 {% endif %}
 {% endif %}
 
-{% if (_inc_apoe_order or _inc_pgx) and data.pgx and data.pgx.apoe_proactive_summary_html %}
+{% if _inc_apoe_order and data.pgx and data.pgx.apoe_proactive_summary_html %}
 <div class="page-break"></div>
 <h2>APOE (주도적 건강)</h2>
 {{ data.pgx.apoe_proactive_summary_html|safe }}
 {% endif %}
+
+<div class="new-page">
+<h2>검사 유전자 목록</h2>
+<p class="text-muted" style="font-size:8.5pt;margin:0 0 12px;">
+    해석 대상 유전자 수: <strong>{{ data.genes_evaluated_count }}</strong> (주문 패널 기준)
+</p>
+{{% if data.interpretation_genes_with_transcripts and data.interpretation_genes_with_transcripts | length > 0 %}}
+{{% set rows = data.interpretation_genes_with_transcripts | batch(3) %}}
+<table class="gene-transcript-table" style="margin-bottom:12px">
+  <thead><tr>
+    <th class="gene-col">유전자</th><th class="tx-col">전사체</th>
+    <th class="gene-col">유전자</th><th class="tx-col">전사체</th>
+    <th class="gene-col">유전자</th><th class="tx-col">전사체</th>
+  </tr></thead>
+  <tbody>
+  {{% for row in rows %}}
+  <tr>
+    {{% for item in row %}}<td class="gene-col">{{{{ item.gene }}}}</td><td class="tx-col">{{{{ item.transcript or '—' }}}}</td>{{% endfor %}}
+    {{% for _ in range(3 - row | length) %}}<td></td><td></td>{{% endfor %}}
+  </tr>
+  {{% endfor %}}
+  </tbody>
+</table>
+{{% elif data.interpretation_genes and data.interpretation_genes | length > 0 %}}
+<p class="text-muted" style="font-size:8pt;margin:0 0 12px;">{{{{ data.interpretation_genes | join(', ') }}}}</p>
+{{% endif %}}
+</div>
+
+{% include 'includes/proactive_appendix_genes_KO.html' %}
+
+<div class="page-break"></div>
+<h2>검사 방법 및 한계</h2>
+<p class="detail-text" style="font-size:8.5pt;line-height:1.45;text-align:justify;">
+제출된 검체에서 추출한 게놈 DNA를 하이브리드화 기반 타겟 캡처로 풍부화한 후 Illumina 기술로 시퀀싱합니다. 별도 표기가 없는 한 타겟 영역은 ≥50× 깊이로 시퀀싱되거나 필요 시 추가 분석이 수행됩니다. 리드는 GRCh38 참조 게놈에 정렬됩니다.<br><br>
+<strong>유전성 질환 선제적 건강 스크리닝(Proactive 패널).</strong> 유전성 암, 심혈관 질환, 대사 및 기타 성인 발병 관련 유전자(부록의 분석 유전자 참조)에서 서열 변이를 확인하고 해석합니다. 분석은 임상적으로 관련 있는 전사체의 코딩 영역, 인접 스플라이스 관련 인트론, 및 패널 설계에 포함된 선정 비코딩 영역에 중점을 둡니다. 소규모 변이는 ACMG/AMP 지침에 따라 분류합니다. 타겟 외현자의 카피수 변화는 내부 참조 샘플과 비교한 read-depth 알고리즘으로 평가할 수 있습니다. 병원성 또는 likely pathogenic으로 분류되어 실험실 검토를 거친 변이만 보고하며, VUS 및 benign/likely benign 변이는 별도 언급이 없는 한 보고하지 않습니다.<br><br>
+<strong>약물유전체(PGx).</strong> PharmCAT을 사용하여 변이를 공표된 star-allele 정의와 대조하고 CPIC·DPWG 임상 지침에 따라 예측 표형 및 activity score를 부여합니다. 확장 PGx 패널의 추가 약물유전자 및 선정 tag 변이도 genotyping합니다. actionable diplotype이 확인되면 CPIC/DPWG 권고에 따른 약물-유전자 상호작용 요약을 제공합니다. 본 보고서에 APOE ε2/ε3/ε4 tag SNP가 포함된 경우, 알츠하이머 및 지질 관련 위험에 대한 보조 정보이며 독립 진단 검사가 아닙니다.<br><br>
+성염색체 마커는 QC 목적으로 평가될 수 있으며, 신고된 성별과 불일치 시 실험실 정책에 따라 기재할 수 있습니다. 본 보고서는 보고일 기준 임상 검토 결과를 반영합니다. gnomAD, dbSNP 등 공개 자원의 rsID 및 PMID 문헌을 인용할 수 있습니다.<br><br>
+<strong>한계.</strong> 본 검사는 모든 질병 원인 변이를 검출하지 못합니다. 프로모터, 깊은 인트론, UTR 및 캡처 설계 밖 비코딩 영역은 충분히 분석되지 않습니다. 구조 변이, 대규모 재배열, trinucleotide repeat 확장, gene conversion, 반복·segmental duplication 영역 변이는 검출·완전 해석이 어려울 수 있습니다. mosaicism, phasing 불확실성, mapping ambiguity가 해석을 제한할 수 있습니다. PGx 결과는 현재 allele 정의 catalog에 의존하며 rare/novel haplotype을 놓칠 수 있고, star-allele 주석은 증거 업데이트에 따라 변경될 수 있습니다. PGx는 약물 상호작용, 장기 기능, 비유전적 요인을 반영하지 않습니다. 유전성·PGx 음성 결과가 미래 질환 위험 배제 또는 정상 약물 반응을 보장하지 않습니다. 결과는 전체 임상 맥락에서 자격을 갖춘 의료진이 해석해야 합니다.
+</p>
 
 <div class="disclaimer">
     <strong>면책 조항:</strong> 본 보고서는 자격을 갖춘 의료 전문가만을 위한 것입니다.

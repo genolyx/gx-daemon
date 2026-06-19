@@ -243,6 +243,96 @@ def test_align_upgrades_stored_low_when_inference_high_and_clears_approval():
     assert out[0]["approved"] is False
 
 
+def test_apply_reviewer_section_reviews_keeps_low_and_approval_on_cah():
+    sections = [
+        {
+            "title": "CYP21A2 analysis (CAH - dosage)",
+            "body": "Possible deletion.\n",
+            "kind": "normal",
+        },
+    ]
+    incoming = [{"approved": True, "notes": "Clinically benign", "risk": "low"}]
+    out = _dg.apply_reviewer_section_reviews(incoming, 1, sections)
+    assert out[0]["risk"] == "low"
+    assert out[0]["approved"] is True
+    assert out[0]["reviewer_set"] is True
+    assert _dg.effective_risk_for_section(out[0], sections[0]) == "low"
+    assert _dg.effective_approved_for_dark_genes_section(out[0], sections[0]) is True
+
+
+def test_reviewer_locked_low_unapproved_excludes_core_from_pdf():
+    sec = {
+        "title": "CYP21A2 analysis (CAH - dosage)",
+        "body": "Benign.\n",
+        "kind": "normal",
+    }
+    rev = {"approved": False, "risk": "low", "notes": "", "reviewer_set": True}
+    assert _dg.effective_risk_for_section(rev, sec) == "low"
+    assert _dg.effective_approved_for_dark_genes_section(rev, sec) is False
+
+
+def test_reviewer_locked_high_approved_includes_core():
+    sec = {
+        "title": "CYP21A2 analysis (CAH - dosage)",
+        "body": "Possible deletion.\n",
+        "kind": "normal",
+    }
+    rev = {"approved": True, "risk": "high", "notes": "Confirmed", "reviewer_set": True}
+    assert _dg.effective_risk_for_section(rev, sec) == "high"
+    assert _dg.effective_approved_for_dark_genes_section(rev, sec) is True
+
+
+def test_dark_genes_for_pdf_honors_reviewer_set_low_approved_cah():
+    block = {
+        "status": "found",
+        "detailed_sections": [
+            {
+                "title": "CYP21A2 analysis (CAH - dosage)",
+                "body": "Possible deletion.\n",
+                "kind": "normal",
+            },
+        ],
+        "section_reviews": [
+            {
+                "approved": True,
+                "risk": "low",
+                "notes": "Clinically benign after review",
+                "reviewer_set": True,
+            }
+        ],
+    }
+    pdf = _dg.dark_genes_for_pdf(block)
+    assert (pdf.get("report_detailed_html") or "").strip()
+    assert "Congenital Adrenal Hyperplasia" in pdf["report_detailed_html"]
+
+
+def test_pad_display_uses_stored_high_when_pipeline_benign():
+    """Portal display: stored high tier is not downgraded when pipeline is benign."""
+    sections = [
+        {
+            "title": "CYP21A2 analysis (CAH - dosage)",
+            "body": "Normal copy-number result, no warnings.\n",
+            "kind": "normal",
+        },
+    ]
+    rev = [{"approved": True, "risk": "high", "notes": "", "reviewer_set": True}]
+    out = _align_rev(rev, 1, sections)
+    assert out[0]["risk"] == "high"
+    assert out[0]["approved"] is True
+    sections = [
+        {
+            "title": "CYP21A2 analysis (CAH - dosage)",
+            "body": "Possible deletion.\n",
+            "kind": "normal",
+        },
+    ]
+    prev = [{"approved": True, "notes": "", "risk": "low", "reviewer_set": True}]
+    out = _align_rev(prev, 1, sections)
+    assert out[0]["risk"] == "low"
+    assert out[0]["approved"] is True
+    assert out[0]["reviewer_set"] is True
+
+
 def test_align_clears_approval_when_inference_high_and_disk_risk_missing():
     sections = [
         {

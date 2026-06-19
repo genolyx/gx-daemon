@@ -214,6 +214,18 @@ def _merge_dark_genes_from_result_json_for_pdf(
         )
 
 
+def _pgx_for_report_pdf(pgx: Dict[str, Any], report_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Apply PGx PDF subset + proactive APOE defaults from report metadata."""
+    from .pgx_report import pgx_for_pdf
+
+    meta = report_data.get("report_metadata") if isinstance(report_data.get("report_metadata"), dict) else {}
+    return pgx_for_pdf(
+        pgx,
+        default_include_apoe_proactive=bool(meta.get("include_apoe_on_proactive_pdf")),
+        apoe_lang=str(meta.get("language") or "EN"),
+    )
+
+
 def _merge_pgx_from_result_json_for_pdf(
     report_data: Dict[str, Any],
     report_json_path: str,
@@ -262,7 +274,8 @@ def _merge_pgx_from_result_json_for_pdf(
 
     rows.sort(key=lambda x: x[0], reverse=True)
     _mt, src, pgx = rows[0]
-    report_data["pgx"] = pgx_for_pdf(pgx)
+    report_data["pgx"] = _pgx_for_report_pdf(pgx, report_data)
+    _apply_pgx_portal_flags_to_report_metadata(report_data, pgx)
     logger.info("[generate_report_pdf] merged pgx from %s", src)
 
 
@@ -313,7 +326,8 @@ def _merge_pgx_from_result_json_for_report_json(
 
     rows.sort(key=lambda x: x[0], reverse=True)
     _mt, src, pgx = rows[0]
-    report_data["pgx"] = pgx_for_pdf(pgx)
+    report_data["pgx"] = _pgx_for_report_pdf(pgx, report_data)
+    _apply_pgx_portal_flags_to_report_metadata(report_data, pgx)
     logger.info("[generate_report_json] merged pgx from %s", src)
 
 
@@ -346,6 +360,47 @@ _REPORT_TYPE_LABEL_FOR_KIND: Dict[str, str] = {
 def report_type_label_for_pdf_kind(pdf_kind: Optional[str]) -> str:
     k = (pdf_kind or "standard").strip()
     return _REPORT_TYPE_LABEL_FOR_KIND.get(k, "Carrier Screening Report")
+
+
+def _ensure_proactive_report_metadata(report_data: Dict[str, Any]) -> None:
+    """Proactive PDFs always include PGx tables when result data exists."""
+    md = report_data.get("report_metadata")
+    if not isinstance(md, dict):
+        return
+    if md.get("pdf_template_kind") != "proactive":
+        return
+    md["include_pgx"] = True
+
+
+def _apply_pgx_portal_flags_to_report_metadata(
+    report_data: Dict[str, Any], raw_pgx: Optional[Dict[str, Any]]
+) -> None:
+    """When reviewer saved PGx inclusions, mirror APOE PDF toggle into report metadata."""
+    md = report_data.get("report_metadata")
+    if not isinstance(md, dict) or md.get("pdf_template_kind") != "proactive":
+        return
+    if not isinstance(raw_pgx, dict):
+        return
+    pr = raw_pgx.get("portal_review")
+    if not isinstance(pr, dict) or not pr.get("inclusions_saved"):
+        return
+    ex = pr.get("include_apoe_proactive_pdf")
+    if ex is False or str(ex).strip().lower() in ("false", "0", "no"):
+        md["include_apoe_on_proactive_pdf"] = False
+    elif ex is True or str(ex).strip().lower() in ("true", "1", "yes"):
+        md["include_apoe_on_proactive_pdf"] = True
+
+
+def _strip_apoe_from_report_if_excluded(report_data: Dict[str, Any]) -> None:
+    """Keep EN/CN/KO PDFs aligned — drop APOE HTML when reviewer or metadata excluded it."""
+    md = report_data.get("report_metadata")
+    if not isinstance(md, dict):
+        return
+    if md.get("include_apoe_on_proactive_pdf") is not False:
+        return
+    pgx = report_data.get("pgx")
+    if isinstance(pgx, dict):
+        pgx["apoe_proactive_summary_html"] = ""
 
 
 def carrier_pdf_jinja_stem(pdf_kind: Optional[str], is_couple: bool) -> str:
@@ -629,6 +684,307 @@ def _load_panel_disease_inheritance_by_name(panel_json_path: str) -> Dict[str, s
             if k:
                 out[k] = inh
     return out
+
+
+def _load_gene_disease_catalog_from_mapping(disease_gene_json: str) -> Dict[str, List[Dict[str, str]]]:
+    """
+    ``disease_gene_mapping.json`` → gene symbol → list of disease label dicts
+    (``disease_name``, ``disease_name_cn``, ``disease_name_ko``, ``inheritance``).
+    """
+    out: Dict[str, List[Dict[str, str]]] = {}
+    path = (disease_gene_json or "").strip()
+    if not path or not os.path.isfile(path):
+        return out
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except OSError:
+        return out
+    for d in raw.get("diseases") or []:
+        if not isinstance(d, dict):
+            continue
+        entry = {
+            "disease_name": (d.get("disease_name") or d.get("name") or "").strip(),
+            "disease_name_cn": (d.get("disease_name_cn") or "").strip(),
+            "disease_name_ko": (d.get("disease_name_ko") or "").strip(),
+            "inheritance": (d.get("inheritance") or "").strip(),
+        }
+        if not entry["disease_name"]:
+            continue
+        for g in d.get("genes") or []:
+            gk = str(g).strip().upper()
+            if not gk:
+                continue
+            bucket = out.setdefault(gk, [])
+            if entry["disease_name"] not in {x.get("disease_name") for x in bucket}:
+                bucket.append(dict(entry))
+    return out
+
+
+def _merge_gene_disease_catalogs(
+    primary: Dict[str, List[Dict[str, str]]],
+    secondary: Dict[str, List[Dict[str, str]]],
+) -> Dict[str, List[Dict[str, str]]]:
+    """Merge gene→disease catalogs; ``primary`` entries win on duplicate disease names."""
+    out: Dict[str, List[Dict[str, str]]] = {
+        gene: [dict(row) for row in rows] for gene, rows in primary.items()
+    }
+    for gene, rows in secondary.items():
+        bucket = out.setdefault(gene, [])
+        seen = {x.get("disease_name") for x in bucket}
+        for row in rows:
+            name = row.get("disease_name")
+            if name and name not in seen:
+                bucket.append(dict(row))
+                seen.add(name)
+    return out
+
+
+def resolve_proactive_gene_disease_json_path() -> str:
+    """Resolve ``proactive_gene_disease_mapping.json`` for proactive appendix rows."""
+    candidates: List[str] = []
+    try:
+        from ...config import settings as _settings
+
+        proactive = getattr(_settings, "proactive_gene_disease_json", None)
+        if proactive:
+            candidates.append(proactive)
+        pd = _settings.carrier_screening_pipeline_dir
+        candidates.append(os.path.join(pd, "data", "db", "proactive_gene_disease_mapping.json"))
+        sd = (_settings.carrier_screening_script_data_dir or "").strip()
+        if sd:
+            candidates.append(
+                os.path.join(
+                    os.path.abspath(sd),
+                    "data",
+                    "db",
+                    "proactive_gene_disease_mapping.json",
+                )
+            )
+        candidates.append(
+            os.path.join(
+                _settings.carrier_screening_layout_base,
+                "data",
+                "db",
+                "proactive_gene_disease_mapping.json",
+            )
+        )
+    except Exception:
+        pass
+    repo_root = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    )
+    candidates.append(os.path.join(repo_root, "data", "db", "proactive_gene_disease_mapping.json"))
+    candidates.append("/app/data/db/proactive_gene_disease_mapping.json")
+    seen: set = set()
+    for path in candidates:
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        if os.path.isfile(path):
+            return path
+    return ""
+
+
+def _disorder_labels_for_gene_from_catalog(
+    gene: str,
+    catalog: Dict[str, List[Dict[str, str]]],
+    lang: str = "EN",
+) -> str:
+    lang_u = (lang or "EN").strip().upper()
+    rows = catalog.get((gene or "").strip().upper()) or []
+    labels: List[str] = []
+    for row in rows:
+        if lang_u == "CN":
+            label = (row.get("disease_name_cn") or row.get("disease_name") or "").strip()
+        elif lang_u == "KO":
+            label = (row.get("disease_name_ko") or row.get("disease_name") or "").strip()
+        else:
+            label = (row.get("disease_name") or "").strip()
+        if label and label not in labels:
+            labels.append(label)
+    return "; ".join(labels)
+
+
+def _disorder_label_from_gene_knowledge_db(
+    gene: str,
+    gene_knowledge_db: str,
+    lang: str = "EN",
+) -> str:
+    gk = (gene_knowledge_db or "").strip()
+    if not gk or not (gene or "").strip():
+        return ""
+    g = gene.strip().upper()
+    lang_u = (lang or "EN").strip().upper()
+    if lang_u != "EN":
+        try:
+            from .gene_knowledge_db import read_gene_knowledge_locale_row
+
+            loc = read_gene_knowledge_locale_row(g, gk, lang_u)
+            if loc and (loc.get("disorder") or "").strip():
+                return str(loc["disorder"]).strip()
+        except Exception:
+            pass
+    try:
+        from .gene_knowledge_db import read_gene_knowledge_full_row
+
+        row = read_gene_knowledge_full_row(g, gk)
+        if row and (row.get("disorder") or "").strip():
+            return str(row["disorder"]).strip()
+    except Exception:
+        pass
+    try:
+        from .gene_knowledge_db import diseases_from_gene_knowledge_sqlite
+
+        dis = diseases_from_gene_knowledge_sqlite(g, gk)
+        names = [
+            (d.get("name") or d.get("disease_name") or "").strip()
+            for d in dis
+            if isinstance(d, dict)
+        ]
+        names = [n for n in names if n]
+        if names:
+            return "; ".join(dict.fromkeys(names))
+    except Exception:
+        pass
+    return ""
+
+
+def build_interpretation_gene_disease_rows(
+    genes: List[str],
+    *,
+    disease_gene_json: str = "",
+    proactive_disease_gene_json: str = "",
+    gene_knowledge_db: str = "",
+    lang: str = "EN",
+) -> List[Dict[str, str]]:
+    """
+    Build appendix rows ``{gene, disorder}`` for proactive «Genes Tested» table.
+
+    Uses carrier ``disease_gene_mapping.json``, proactive panel mapping, then
+    ``gene_knowledge.db`` disorder field.
+    """
+    catalog = _load_gene_disease_catalog_from_mapping(disease_gene_json)
+    proactive_catalog = _load_gene_disease_catalog_from_mapping(proactive_disease_gene_json)
+    if proactive_catalog:
+        catalog = _merge_gene_disease_catalogs(catalog, proactive_catalog)
+    rows: List[Dict[str, str]] = []
+    seen: set = set()
+    for raw_g in genes or []:
+        gene = (raw_g or "").strip().upper()
+        if not gene or gene in seen:
+            continue
+        seen.add(gene)
+        disorder = _disorder_labels_for_gene_from_catalog(gene, catalog, lang)
+        if not disorder:
+            disorder = _disorder_label_from_gene_knowledge_db(gene, gene_knowledge_db, lang)
+        rows.append({"gene": gene, "disorder": disorder or "—"})
+    rows.sort(key=lambda r: r["gene"])
+    return rows
+
+
+def _load_proactive_panel_metadata(proactive_disease_gene_json: str) -> Dict[str, Any]:
+    """Read ``categories`` and gene→category from proactive mapping JSON."""
+    path = (proactive_disease_gene_json or "").strip()
+    out: Dict[str, Any] = {"categories": [], "gene_category": {}}
+    if not path or not os.path.isfile(path):
+        return out
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except OSError:
+        return out
+    out["categories"] = raw.get("categories") or []
+    gene_cat: Dict[str, str] = {}
+    for d in raw.get("diseases") or []:
+        if not isinstance(d, dict):
+            continue
+        cat = (d.get("category") or "other").strip().lower() or "other"
+        for g in d.get("genes") or []:
+            gk = str(g).strip().upper()
+            if gk:
+                gene_cat[gk] = cat
+    out["gene_category"] = gene_cat
+    return out
+
+
+def _category_label_for_lang(cat: Dict[str, Any], lang: str) -> str:
+    lang_u = (lang or "EN").strip().upper()
+    if lang_u == "CN":
+        return (cat.get("label_cn") or cat.get("label_en") or cat.get("id") or "").strip()
+    if lang_u == "KO":
+        return (cat.get("label_ko") or cat.get("label_en") or cat.get("id") or "").strip()
+    return (cat.get("label_en") or cat.get("id") or "").strip()
+
+
+def _pair_gene_disease_rows_two_columns(
+    rows: List[Dict[str, str]],
+) -> List[Dict[str, Optional[Dict[str, str]]]]:
+    """Split rows into left/right pairs for dual-column appendix tables."""
+    if not rows:
+        return []
+    split_at = (len(rows) + 1) // 2
+    left = rows[:split_at]
+    right = rows[split_at:]
+    pairs: List[Dict[str, Optional[Dict[str, str]]]] = []
+    for i in range(split_at):
+        pairs.append(
+            {
+                "left": left[i] if i < len(left) else None,
+                "right": right[i] if i < len(right) else None,
+            }
+        )
+    return pairs
+
+
+def build_interpretation_gene_disease_groups(
+    genes: List[str],
+    *,
+    disease_gene_json: str = "",
+    proactive_disease_gene_json: str = "",
+    gene_knowledge_db: str = "",
+    lang: str = "EN",
+) -> List[Dict[str, Any]]:
+    """
+    Grouped dual-column appendix blocks for proactive «Genes Tested» page.
+
+    Returns ``[{title, pairs: [{left, right}, …]}, …]`` sorted by clinical category.
+    """
+    rows = build_interpretation_gene_disease_rows(
+        genes,
+        disease_gene_json=disease_gene_json,
+        proactive_disease_gene_json=proactive_disease_gene_json,
+        gene_knowledge_db=gene_knowledge_db,
+        lang=lang,
+    )
+    meta = _load_proactive_panel_metadata(proactive_disease_gene_json)
+    gene_cat: Dict[str, str] = meta.get("gene_category") or {}
+    categories: List[Dict[str, Any]] = meta.get("categories") or []
+    if not categories:
+        categories = [
+            {"id": "cancer", "label_en": "Cancer predisposition", "order": 1},
+            {"id": "cardio", "label_en": "Cardiovascular", "order": 2},
+            {"id": "other", "label_en": "Metabolic, hematologic & other", "order": 3},
+        ]
+    by_cat: Dict[str, List[Dict[str, str]]] = {}
+    for row in rows:
+        cat_id = gene_cat.get(row["gene"], "other")
+        by_cat.setdefault(cat_id, []).append(row)
+    groups: List[Dict[str, Any]] = []
+    for cat in sorted(categories, key=lambda c: int(c.get("order") or 99)):
+        cat_id = (cat.get("id") or "").strip().lower()
+        cat_rows = by_cat.get(cat_id) or []
+        if not cat_rows:
+            continue
+        cat_rows.sort(key=lambda r: r["gene"])
+        groups.append(
+            {
+                "id": cat_id,
+                "title": _category_label_for_lang(cat, lang),
+                "pairs": _pair_gene_disease_rows_two_columns(cat_rows),
+            }
+        )
+    return groups
 
 
 def _inheritance_from_gene_panel_mapper(gene: str, mapper: Any) -> str:
@@ -1019,6 +1375,28 @@ def generate_report_json(
         order_params if isinstance(order_params, dict) else None
     )
 
+    # Build gene+transcript list for PDF "Genes Evaluated" table
+    def _get_mane_gff() -> Optional[str]:
+        try:
+            from ...config import get_settings
+            s = get_settings()
+            return (getattr(s, "mane_gff", None) or "").strip() or None
+        except Exception:
+            return None
+
+    def _build_interp_gene_transcript_list(genes: List[str]) -> List[Dict[str, str]]:
+        mane_gff = _get_mane_gff()
+        if not mane_gff or not genes:
+            return [{"gene": g, "transcript": ""} for g in genes]
+        try:
+            from .annotator import MANEAnnotator
+            ann = MANEAnnotator(mane_gff)
+            return [{"gene": g, "transcript": ann.transcript(g) or ""} for g in genes]
+        except Exception:
+            return [{"gene": g, "transcript": ""} for g in genes]
+
+    interp_genes_with_transcripts = _build_interp_gene_transcript_list(interp_genes or [])
+
     genes_n = order_flat.get("genes_evaluated_count")
     try:
         genes_evaluated_count = int(genes_n) if genes_n is not None and str(genes_n).strip() != "" else 302
@@ -1061,11 +1439,16 @@ def generate_report_json(
         or order_flat.get("hospital")
         or "",
         "doctor": order_flat.get("doctor") or "",
-        # Proactive: PharmCAT PDF block (separate from APOE tag SNPs)
         "include_pgx": _include_pgx_on_pdf(order_flat.get("include_pgx")),
-        # Proactive: APOE ε2/ε3/ε4 PDF block when order checked APOE genotype tag SNPs at submit
-        "include_apoe_on_proactive_pdf": _order_apoe_genotyping_requested(
-            order_flat.get("include_apoe_pgx")
+        # Proactive: APOE ε2/ε3/ε4 PDF block — default on for proactive health orders
+        "include_apoe_on_proactive_pdf": (
+            True
+            if pdf_tk == "proactive"
+            and (
+                order_flat.get("include_apoe_pgx") is None
+                or str(order_flat.get("include_apoe_pgx")).strip() == ""
+            )
+            else _order_apoe_genotyping_requested(order_flat.get("include_apoe_pgx"))
         ),
     }
 
@@ -1085,6 +1468,7 @@ def generate_report_json(
 
         # Panel gene list for PDF «Genes Evaluated» (empty if not resolvable from order / catalog)
         "interpretation_genes": interp_genes,
+        "interpretation_genes_with_transcripts": interp_genes_with_transcripts,
 
         # 캐리어 상태 요약
         "carrier_status": carrier_status,
@@ -1137,6 +1521,8 @@ def generate_report_json(
     _merge_pgx_from_result_json_for_report_json(
         report, result_json_path, extra_result_json_paths
     )
+    _ensure_proactive_report_metadata(report)
+    _strip_apoe_from_report_if_excluded(report)
 
     output_path = os.path.join(output_dir, "report.json")
     atomic_write_json_file(output_path, report)
@@ -1371,6 +1757,9 @@ def generate_report_pdf(
     except Exception as e:
         logger.warning("[generate_report_pdf] pgx PDF sanitize skipped: %s", e)
 
+    _ensure_proactive_report_metadata(report_data)
+    _strip_apoe_from_report_if_excluded(report_data)
+
     if not pdf_template_kind_excludes_dark_genes(pdf_tk_disk):
         dg = report_data.get("dark_genes")
         if not isinstance(dg, dict) or not (
@@ -1423,31 +1812,70 @@ def generate_report_pdf(
         try:
             lang_u = (lang or "EN").strip().upper() or "EN"
             render_data = report_data
-            gk_db = (template_dir or "").strip()
-            # template_dir is HTML dir; gene DB path comes from settings when localizing narratives
-            if lang_u != "EN":
-                try:
-                    from ...config import settings as _settings
+            gk_path = ""
+            gemini_key = ""
+            gemini_model = "gemini-2.5-flash"
+            try:
+                from ...config import settings as _settings
 
-                    gk_path = (_settings.gene_knowledge_db or "").strip()
+                gk_path = (_settings.gene_knowledge_db or "").strip()
+                gemini_key = (_settings.gemini_api_key or "").strip()
+                gemini_model = getattr(
+                    _settings, "gene_knowledge_gemini_model", "gemini-2.5-flash"
+                )
+            except Exception:
+                pass
+            if lang_u != "EN":
+                import copy
+
+                render_data = copy.deepcopy(report_data)
+                try:
                     if gk_path:
                         from .gene_knowledge_db import localize_report_data_for_language
 
                         render_data = localize_report_data_for_language(
-                            report_data,
+                            render_data,
                             lang_u,
                             gk_path,
-                            gemini_api_key=(_settings.gemini_api_key or "").strip(),
-                            model=getattr(
-                                _settings, "gene_knowledge_gemini_model", "gemini-2.5-flash"
-                            ),
-                            allow_gemini=bool((_settings.gemini_api_key or "").strip()),
+                            gemini_api_key=gemini_key,
+                            model=gemini_model,
+                            allow_gemini=bool(gemini_key),
                         )
                 except Exception as loc_err:
                     logger.warning(
                         "Report %s localization skipped: %s", lang_u, loc_err
                     )
+                try:
+                    from .pgx_report import localize_pgx_for_language
 
+                    render_data = localize_pgx_for_language(
+                        render_data,
+                        lang_u,
+                        db_path=gk_path,
+                        gemini_api_key=gemini_key,
+                        model=gemini_model,
+                        allow_gemini=bool(gemini_key),
+                    )
+                except Exception as pgx_loc_err:
+                    logger.warning(
+                        "Report %s PGx localization skipped: %s", lang_u, pgx_loc_err
+                    )
+                try:
+                    from .dark_genes import localize_dark_genes_for_language
+
+                    render_data = localize_dark_genes_for_language(
+                        render_data,
+                        lang_u,
+                        db_path=gk_path,
+                        gemini_api_key=gemini_key,
+                        model=gemini_model,
+                        allow_gemini=bool(gemini_key),
+                    )
+                except Exception as dg_loc_err:
+                    logger.warning(
+                        "Report %s dark_genes localization skipped: %s", lang_u, dg_loc_err
+                    )
+                _strip_apoe_from_report_if_excluded(render_data)
             html_content = _render_html_for_language(
                 render_data, lang_u, template_dir, is_couple
             )

@@ -112,8 +112,33 @@
             }
             .banner-pos { background-color: #fff1f2; color: #be123c; border: 1px solid #be123c; }
             .banner-neg { background-color: #f0fdf4; color: #15803d; border: 1px solid #15803d; }
-            .status-text { font-size: 12pt; font-weight: 500; margin: 0; }
-            .banner-desc { margin: 4px 0 0 0; font-size: 8.5pt; color: #334155; }
+            .status-text { font-size: 13pt; font-weight: 600; margin: 0; letter-spacing: 0.02em; }
+            .banner-desc { margin: 6px 0 0 0; font-size: 8.5pt; color: #334155; line-height: 1.4; }
+            .banner-icon { font-size: 16pt; margin-right: 8px; vertical-align: middle; }
+            .banner-inner { display: block; }
+            .empty-findings-card {
+                text-align: center;
+                padding: 28px 20px;
+                color: #64748b;
+                background: #f8fafc;
+                border: 1px solid #e2e8f0;
+                border-radius: 6px;
+                font-size: 8.5pt;
+            }
+            .empty-findings-card strong { color: #15803d; display: block; font-size: 10pt; margin-bottom: 4px; }
+            .cls-badge {
+                display: inline-block;
+                font-size: 7pt;
+                font-weight: 600;
+                padding: 2px 7px;
+                border-radius: 4px;
+                white-space: nowrap;
+            }
+            .cls-pathogenic { background: #ffe4e6; color: #be123c; }
+            .cls-likely-pathogenic { background: #ffedd5; color: #c2410c; }
+            .cls-vus { background: #fef9c3; color: #a16207; }
+            .cls-benign, .cls-likely-benign { background: #dcfce7; color: #15803d; }
+            .cls-default { background: #f1f5f9; color: #475569; }
 
             /* Findings Table */
             .summary-table {
@@ -135,6 +160,97 @@
                 border-bottom: 1px solid #f1f5f9;
                 font-size: 8pt;
                 vertical-align: top;
+            }
+            .appendix-dual-table tbody td {
+                padding: 3pt 5px;
+                font-size: 8pt;
+                line-height: 1.35;
+                border-bottom: none;
+                vertical-align: top;
+            }
+            .appendix-dual-table thead th {
+                background: #f1f5f9;
+                color: #475569;
+                font-size: 7pt;
+                padding: 4px 5px;
+                font-weight: 600;
+            }
+            .appendix-dual-table td.gene-col {
+                width: 11%;
+                font-weight: 600;
+                color: #0f172a;
+                white-space: nowrap;
+            }
+            .appendix-dual-table td.cond-col {
+                width: 39%;
+                color: #475569;
+            }
+            .appendix-dual-table td.split-col {
+                border-left: 1px solid #e8ecf0;
+            }
+            .appendix-row-even { background: #ffffff; }
+            .appendix-row-odd { background: #f8fafc; }
+            .appendix-section-page {
+                page-break-before: always;
+            }
+            .appendix-section-header {
+                font-size: 10pt;
+                font-weight: 600;
+                color: #0f172a;
+                padding: 6px 10px;
+                margin-bottom: 8px;
+                border-radius: 0 4px 4px 0;
+            }
+            .appendix-cat-icon {
+                display: inline-block;
+                width: 8pt;
+                height: 8pt;
+                font-family: Arial, Helvetica, sans-serif;
+                font-size: 7pt;
+                line-height: 8pt;
+                text-align: center;
+                vertical-align: middle;
+                margin-right: 1px;
+            }
+            .appendix-cat-icon-cancer {
+                font-size: 5.5pt;
+            }
+            .appendix-cat-cancer.appendix-section-header {
+                background: #fff1f2;
+                border-left: 4px solid #be123c;
+            }
+            .appendix-cat-cardio.appendix-section-header {
+                background: #eff6ff;
+                border-left: 4px solid #2563eb;
+            }
+            .appendix-cat-other.appendix-section-header {
+                background: #f0fdfa;
+                border-left: 4px solid #0d9488;
+            }
+            .appendix-cat-pgx.appendix-section-header {
+                background: #f5f3ff;
+                border-left: 4px solid #7c3aed;
+            }
+            .appendix-cat-icon-pgx {
+                font-size: 0;
+                line-height: 0;
+                width: 9pt;
+                height: 5pt;
+                border: 0.7pt solid #7c3aed;
+                border-radius: 2.5pt;
+                background: linear-gradient(90deg, #7c3aed 0%, #7c3aed 46%, #ede9fe 54%, #ede9fe 100%);
+                box-sizing: border-box;
+                vertical-align: middle;
+            }
+            .appendix-page .section-title {
+                margin-top: 6px;
+                margin-bottom: 4px;
+            }
+            .appendix-summary-line {
+                font-size: 7.5pt;
+                color: #64748b;
+                margin: 0 0 4px 0;
+                line-height: 1.3;
             }
             
             /* Detailed Interpretations - Page 2 Bolder Designation */
@@ -165,12 +281,14 @@
 
             .section-title {
                 margin-top: 25px;
-                font-size: 11pt;
-                font-weight: 500;
+                font-size: 12pt;
+                font-weight: 600;
                 color: #0f172a;
                 border-bottom: 1px solid #e2e8f0;
-                padding-bottom: 4px;
+                padding: 0 0 6px 10px;
+                border-left: 4px solid #3b82f6;
                 text-transform: uppercase;
+                letter-spacing: 0.04em;
             }
 
             .detail-item {
@@ -204,6 +322,11 @@
                 text-align: justify;   /* Aligns edges nicely on the page */
                 word-break: break-all; /* Ensures long gene names don't break the layout */
             }
+        .gene-transcript-table { width:100%; border-collapse:collapse; font-size:7.5pt; margin-top:8px; table-layout:fixed; }
+        .gene-transcript-table th { background:#f1f5f9; color:#475569; font-weight:700; font-size:7pt; text-transform:uppercase; letter-spacing:.04em; padding:4px 6px; border:1px solid #e2e8f0; }
+        .gene-transcript-table td { padding:3px 6px; border:1px solid #e2e8f0; color:#334155; vertical-align:top; }
+        .gene-transcript-table td.gene-col { font-weight:600; }
+        .gene-transcript-table td.tx-col { font-family:monospace; color:#64748b; }
 
             /* PGx structured tables (same data as standalone PGx report) */
             .banner.banner-pgx-act { background-color: #fffbeb; color: #92400e; border: 1px solid #d97706; }
@@ -268,12 +391,12 @@
     {# Change the check to look at the primary patient's findings #}
         {% if data.primary_patient.findings | length > 0 %}
         <div class="banner banner-pos">
-            <p class="status-text">+ POSITIVE</p>
+            <p class="status-text"><span class="banner-icon">+</span> POSITIVE</p>
             <p class="banner-desc">Clinically significant genetic variant(s) identified. See details for the condition(s) listed below.</p>
         </div>
         {% else %}
         <div class="banner banner-neg">
-            <p class="status-text">- NEGATIVE</p>
+            <p class="status-text"><span class="banner-icon">✓</span> NEGATIVE</p>
             <p class="banner-desc">No clinically significant genetic changes were identified in the genes evaluated.</p>
         </div>
         {% endif %}
@@ -297,13 +420,31 @@
                         </td>
                         <td><span style="font-weight:500;">{{ item.gene }}</span></td>
                         <td><span style="font-weight:500;">{{ item.mutation }}</span></td>
-                        <td><span style="color:#be123c; font-weight:500;">{{ item.classification }}</span></td>
+                        <td>
+                            {% set _cls = (item.classification or '') | lower | replace('_', ' ') %}
+                            {% if 'likely pathogenic' in _cls %}
+                            <span class="cls-badge cls-likely-pathogenic">{{ item.classification }}</span>
+                            {% elif 'pathogenic' in _cls %}
+                            <span class="cls-badge cls-pathogenic">{{ item.classification }}</span>
+                            {% elif 'vus' in _cls or 'uncertain' in _cls %}
+                            <span class="cls-badge cls-vus">{{ item.classification }}</span>
+                            {% elif 'likely benign' in _cls %}
+                            <span class="cls-badge cls-likely-benign">{{ item.classification }}</span>
+                            {% elif 'benign' in _cls %}
+                            <span class="cls-badge cls-benign">{{ item.classification }}</span>
+                            {% else %}
+                            <span class="cls-badge cls-default">{{ item.classification }}</span>
+                            {% endif %}
+                        </td>
                     </tr>
                     {% endfor %}
                 {% else %}
                     <tr>
-                        <td colspan="4" style="text-align: center; padding: 30px; color: #64748b; font-style: italic;">
-                            No clinically significant variants detected in the genes evaluated.
+                        <td colspan="4">
+                            <div class="empty-findings-card">
+                                <strong>✓ No clinically significant variants detected</strong>
+                                No pathogenic or likely pathogenic variants were identified in the genes evaluated for this proactive health screen.
+                            </div>
                         </td>
                     </tr>
                 {% endif %}
@@ -364,7 +505,8 @@
 
     {# include_pgx → structured PGx tables; include_apoe_on_proactive_pdf → APOE tag SNPs #}
     {% set _rm = data.report_metadata if data.report_metadata else {} %}
-    {% set _inc_pgx = _rm.get('include_pgx', true) %}
+    {# Proactive PDFs always render PGx when data.pgx is present (legacy include_pgx=false ignored). #}
+    {% set _inc_pgx = true %}
     {% set _inc_apoe_order = _rm.get('include_apoe_on_proactive_pdf', false) %}
 
     {# Structured PharmCAT + extended panel (curated) — data from pgx_for_pdf merge #}
@@ -509,93 +651,74 @@
     {% endif %}
     {% endif %}
 
-    {% if (_inc_apoe_order or _inc_pgx) and data.pgx and data.pgx.apoe_proactive_summary_html %}
+    {% if _inc_apoe_order and data.pgx and data.pgx.apoe_proactive_summary_html %}
     <div class="new-page">
         <div class="section-title">APOE (proactive health)</div>
         {{ data.pgx.apoe_proactive_summary_html|safe }}
     </div>
     {% endif %}
 
-    <div class="new-page">
+        <div class="new-page">
         <div class="section-title">Genes Evaluated</div>
         <p class="detail-text" style="margin-bottom:10px;font-size:8.5pt;">
             This report reflects evaluation of <strong>{{ data.genes_evaluated_count }}</strong> gene(s) in the ordered interpretation panel.
         </p>
-        {% if data.interpretation_genes and data.interpretation_genes | length > 0 %}
-        <div class="gene-list-grid">
-            {{ data.interpretation_genes | join(', ') }}
-        </div>
-        {% else %}
-        <p class="detail-text" style="font-size:8pt;color:#64748b;">Gene symbols are defined by the laboratory order; the count above matches the configured interpretation panel.</p>
-        {% endif %}
-        {% if _inc_pgx and data.pgx and data.pgx.genes_evaluated and data.pgx.genes_evaluated | length > 0 %}
-        {% set pgx_ev = data.pgx.genes_evaluated %}
-        <div style="margin-top:22px;padding-top:16px;border-top:1px solid #e2e8f0;">
-            <div class="sub-label">Pharmacogenomics — genes evaluated (PGx)</div>
-            <p class="detail-text" style="margin-bottom:8px;margin-top:8px;">
-                This pharmacogenomics report lists <strong>{{ pgx_ev | length }}</strong> gene(s) in the interpretation scope; below, <strong>{{ pgx_ev | length }}</strong> gene symbol(s) appear with analysis results.
-                Genes are analyzed via PharmCAT (CPIC/DPWG star-allele calling) and/or curated variant genotyping (ClinPGx).
-            </p>
-            <div class="gene-list-grid">
-                {{ pgx_ev | join(', ') }}
-            </div>
-        </div>
-        {% endif %}
+        {{% if data.interpretation_genes_with_transcripts and data.interpretation_genes_with_transcripts | length > 0 %}}
+        {{% set rows = data.interpretation_genes_with_transcripts | batch(3) %}}
+        <table class="gene-transcript-table">
+          <thead><tr>
+            <th class="gene-col">Gene</th><th class="tx-col">Transcript</th>
+            <th class="gene-col">Gene</th><th class="tx-col">Transcript</th>
+            <th class="gene-col">Gene</th><th class="tx-col">Transcript</th>
+          </tr></thead>
+          <tbody>
+          {{% for row in rows %}}
+          <tr>
+            {{% for item in row %}}<td class="gene-col">{{{{ item.gene }}}}</td><td class="tx-col">{{{{ item.transcript or '—' }}}}</td>{{% endfor %}}
+            {{% for _ in range(3 - row | length) %}}<td></td><td></td>{{% endfor %}}
+          </tr>
+          {{% endfor %}}
+          </tbody>
+        </table>
+        {{% elif data.interpretation_genes and data.interpretation_genes | length > 0 %}}
+        <div class="gene-list-grid">{{{{ data.interpretation_genes | join(', ') }}}}</div>
+        {{% else %}}
+        <p class="detail-text" style="font-size:8pt;color:#64748b;">Gene symbols are defined by the laboratory order.</p>
+        {{% endif %}}
     </div>
+
+    {% include 'includes/proactive_appendix_genes_EN.html' %}
 
     <div class="new-page">
         <div class="section-title">Methods and Limitations</div>
         <p class="detail-text">
-        Genomic DNA obtained from the submitted sample is enriched for targeted regions using a hybridization-based protocol, and sequenced using
-        Illumina technology. Unless otherwise indicated, all targeted regions are sequenced with ≥50x depth or are supplemented with additional analysis.
-        Reads are aligned to a reference sequence (GRCh37), and sequence changes are identified and interpreted in the context of a single clinically
-        relevant transcript, indicated in the Genes analyzed section. Enrichment and analysis focus on the coding sequence of the indicated transcripts,
-        20bp of flanking intronic sequence, and other specific genomic regions demonstrated to be causative of disease at the time of assay design.
-        Promoters, untranslated regions, and other non-coding regions are not otherwise interrogated. Exonic deletions and duplications are called using
-        an in-house algorithm that determines copy number at each target by comparing the read depth for each target in the proband sequence with
-        both mean read-depth and read-depth distribution, obtained from a set of clinical samples. Markers across the X and Y chromosomes are
-        analyzed for quality control purposes and may detect deviations from the expected sex chromosome complement. Such deviations may be
-        included in the report in accordance with internal guidelines. Invitae utilizes a classification methodology to identify next-generation sequencing
-        (NGS)-detected variants that require orthogonal confirmation (Lincoln, et al. J Mol Diagn. 2019 Mar;21(2):318-329.). Confirmation of the presence
-        and location of reportable variants is performed based on stringent criteria established by Invitae (1400 16th Street, San Francisco, CA 94103,
-        #05D2040778), as needed, using one of several validated orthogonal approaches (PubMed ID 30610921). The following analyses are performed if
-        relevant to the requisition. For GBA the reference genome has been modified to mask the sites of polymorphic paralog sequence variants (PSVs)
-        in both the gene and pseudogene. For CYP21A2 and GBA, if one or more reportable variants, gene conversion, or fusion event is identified via our
-        NGS pipeline (see Limitations), these variants are confirmed by PacBio sequencing of an amplicon generated by long-range PCR and subsequent
-        short-range PCR. In some cases, it may not be possible to disambiguate between the gene and pseudogene. For GJB2, the reportable range
-        includes large upstream deletions overlapping GJB6. For HBA1/2, the reference genome has been modified to force some sequencing reads
-        derived from HBA1 to align to HBA2, and variant calling algorithms are modified to support an expectation of 4 alleles in these regions. HBA1/2
-        copy number calling is performed by a custom hypothesis testing algorithm which generates diplotype calls. If sequence data for a sample does
-        not support a unique high confidence match from among hypotheses tested, that sample is flagged for manual review. Copy number variation is
-        only reported for coding sequence of HBA1 and HBA2 and the HS-40 region. This assay does not distinguish among the -ɑ3.7 subtypes, and all
-        -ɑ3.7 variants are called as HBA1 deletions. This assay may not detect overlapping copy gain and copy loss events when the breakpoints of those
-        events are similar. For FMR1, triplet repeats are detected by PCR with fluorescently labeled primers followed by capillary electrophoresis.
-        Reference ranges: Normal: 45 CGG repeats, intermediate: 45-54 CGG repeats, premutation: 55-200 CGG repeats, full mutation: >200 CGG
-        repeats. For alleles with 55-90 triplet repeats, the region surrounding the FMR1 repeat is amplified by PCR. The PCR amplicons are then processed
-        through PacBio SMRTBell library prep and sequenced using PacBio long read technology. The number of AGG interruptions within the 55-90
-        triplet repeat is read directly from the resulting DNA sequences. Technical component of confirmatory sequencing is performed by Invitae
-        Corporation (1400 16th Street, San Francisco, CA 94103, #05D2040778).<br><br>
-        This report only includes variants that have a clinically significant association with the conditions tested as of the report date. Variants of
-        uncertain significance, benign variants, and likely benign variants are not included in this report. However, if additional evidence becomes
-        available to indicate that the clinical significance of a variant has changed, Invitae may update this report and provide notification.
-        A PMID is a unique identifier referring to a published, scientific paper. Search by PMID athttp://www.ncbi.nlm.nih.gov/pubmed.
-        An rsID is a unique identifier referring to a single genomic position, and is used to associate population frequency information with sequence
-        changes at that position. Reported population frequencies are derived from a number of public sites that aggregate data from large-scale
-        population sequencing projects, including ExAC (http://exac.broadinstitute.org), gnomAD (http://gnomad.broadinstitute.org), and dbSNP
-        (http://ncbi.nlm.nih.gov/SNP).<br><br>
-        Based on validation study results, this assay achieves >99% analytical sensitivity and specificity for single nucleotide variants, insertions and
-        deletions 15bp in length, and exon-level deletions and duplications. Invitae's methods also detect insertions and deletions larger than 15bp but
-        smaller than a full exon but sensitivity for these may be marginally reduced. Invitae’s deletion/duplication analysis determines copy number at a
-        single exon resolution at virtually all targeted exons. However, in rare situations, single-exon copy number events may not be analyzed due to
-        inherent sequence properties or isolated reduction in data quality. Certain types of variants, such as structural rearrangements (e.g. inversions,
-        gene conversion events, translocations, etc.) or variants embedded in sequence with complex architecture (e.g. short tandem repeats or
-        segmental duplications), may not be detected. Additionally, it may not be possible to fully resolve certain details about variants, such as
-        mosaicism, phasing, or mapping ambiguity. Unless explicitly guaranteed, sequence changes in the promoter, non-coding exons, and other non-
-        coding regions are not covered by this assay. Please consult the test definition on our website for details regarding regions or types of variants
-        that are covered or excluded for this test. This report reflects the analysis of an extracted genomic DNA sample. While this test is intended to
-        reflect the analysis of extracted genomic DNA from a referred patient, in very rare cases the analyzed DNA may not represent that individual’s
-        constitutional genome, such as in the case of a circulating hematolymphoid neoplasm, bone marrow transplant, blood transfusion, chimerism,
-        culture artifact or maternal cell contamination.
+        Genomic DNA obtained from the submitted sample is enriched for targeted regions using a hybridization-based capture protocol and sequenced
+        using Illumina technology. Unless otherwise indicated, targeted regions are sequenced to ≥50× depth or supplemented with additional analysis
+        as needed. Reads are aligned to the GRCh38 reference assembly.<br><br>
+        <strong>Hereditary health screening (proactive panel).</strong> Sequence variants are identified and interpreted in genes associated with
+        hereditary cancer predisposition, cardiovascular disease, and metabolic or other adult-onset conditions (see Genes Evaluated appendix).
+        Analysis focuses on coding sequence of clinically relevant transcripts, adjacent intronic splice regions, and selected non-coding regions
+        included in the panel design. Small variants are classified using ACMG/AMP guidelines. Copy-number changes at targeted exons may be assessed
+        using read-depth–based algorithms compared with internal reference samples. Variants classified as pathogenic or likely pathogenic and
+        confirmed by laboratory review are reported; variants of uncertain significance and benign or likely benign variants are not included unless
+        otherwise noted.<br><br>
+        <strong>Pharmacogenomics (PGx).</strong> Pharmacogenomic analysis is performed using PharmCAT, which matches variant calls to published
+        star-allele definitions and assigns predicted phenotypes and activity scores based on CPIC and DPWG clinical guidelines. Additional
+        pharmacogenes and selected tag variants are genotyped against an extended PGx panel. Drug–gene interaction summaries follow published
+        CPIC/DPWG recommendations when actionable diplotypes are identified. Where included on this report, APOE ε2/ε3/ε4 tag-SNP genotypes are
+        provided for supplemental Alzheimer disease and lipid-related risk context and are not a stand-alone diagnostic test.<br><br>
+        Sex-chromosome markers may be evaluated for sample quality control; discrepancies with reported sex may be noted per laboratory policy.
+        This report reflects clinically reviewed results as of the report date. Population allele frequencies may be cited from gnomAD, dbSNP, and
+        other public resources (rsID identifiers). PMID references denote supporting literature.<br><br>
+        <strong>Limitations.</strong> This assay does not detect all disease-causing variants. Promoters, deep intronic regions, untranslated regions,
+        and most non-coding sequence outside the designed capture are not fully interrogated. Structural variants, large rearrangements, triplet-repeat
+        expansions, gene conversions, and variants in repetitive or segmentally duplicated regions may not be detected or fully resolved. Mosaicism,
+        phasing ambiguity, and mapping uncertainty may limit interpretation. PGx results depend on current allele-definition catalogs; rare or novel
+        haplotypes may be missed, and star-allele assignments may change as evidence evolves. PGx findings do not account for drug–drug interactions,
+        organ function, or other non-genetic factors. Negative hereditary and PGx results do not eliminate future disease risk or guarantee normal drug
+        response. Results should be interpreted by a qualified healthcare professional in the context of the full clinical picture. This report
+        reflects analysis of extracted genomic DNA; in rare circumstances the sample may not represent the patient’s constitutional genome (e.g.,
+        post-transplant, transfusion, or malignancy-related findings).
         </p>
         <div class="director-section">
             <div style="margin-bottom: 5px;">

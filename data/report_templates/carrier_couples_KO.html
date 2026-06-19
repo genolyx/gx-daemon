@@ -187,6 +187,26 @@
 <p class="text-muted" style="font-size:8.5pt;margin:0 0 12px;padding:0 4px;">
     해석 대상 유전자 수: <strong>{{ data.genes_evaluated_count }}</strong> (주문 패널 기준)
 </p>
+{% if data.interpretation_genes_with_transcripts and data.interpretation_genes_with_transcripts | length > 0 %}
+{% set rows = data.interpretation_genes_with_transcripts | batch(3) %}
+<table class="gene-transcript-table" style="margin-bottom:12px">
+  <thead><tr>
+    <th class="gene-col">유전자</th><th class="tx-col">전사체</th>
+    <th class="gene-col">유전자</th><th class="tx-col">전사체</th>
+    <th class="gene-col">유전자</th><th class="tx-col">전사체</th>
+  </tr></thead>
+  <tbody>
+  {% for row in rows %}
+  <tr>
+    {% for item in row %}<td class="gene-col">{{ item.gene }}</td><td class="tx-col">{{ item.transcript or '—' }}</td>{% endfor %}
+    {% for _ in range(3 - row | length) %}<td></td><td></td>{% endfor %}
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% elif data.interpretation_genes and data.interpretation_genes | length > 0 %}
+<p class="text-muted" style="font-size:8pt;margin:0 0 12px;">{{ data.interpretation_genes | join(', ') }}</p>
+{% endif %}
 
 <!-- Result Status -->
 {% set status = data.carrier_status.status | default('negative') %}

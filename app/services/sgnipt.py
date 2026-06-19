@@ -629,6 +629,220 @@ class SgNIPTPlugin(ServicePlugin):
         return True
 
     @staticmethod
+    def _find_vep_vcf(analysis_dir: Optional[str], sample_id: str) -> Optional[str]:
+        """vep.vcf.gz 위치 탐색 (work/ 제외)."""
+        candidates = [
+            os.path.join(analysis_dir or "", "variant", f"{sample_id}.vep.vcf.gz"),
+            os.path.join(analysis_dir or "", "variants", f"{sample_id}.vep.vcf.gz"),
+        ]
+        found = next((p for p in candidates if p and os.path.isfile(p)), None)
+        if found:
+            return found
+        # glob fallback
+        for pat in [
+            os.path.join(analysis_dir or "", "**", f"{sample_id}.vep.vcf.gz"),
+        ]:
+            hits = [p for p in glob.glob(pat, recursive=True) if "/work/" not in p]
+            if hits:
+                return hits[0]
+        return None
+
+    @staticmethod
+    def _parse_vep_vcf(vep_vcf_path: str) -> Dict[Tuple, Dict]:
+        """
+        vep.vcf.gz 를 파싱하여 {(chrom, pos, ref, alt): vep_dict} 를 반환합니다.
+        각 변이에 대해 MANE_SELECT 전사체를 우선 선택하고, 없으면 CANONICAL, 없으면 첫 번째 전사체를 사용.
+
+        반환 vep_dict 구조:
+          hgvsc, hgvsp, consequence, impact, symbol, mane,
+          gnomad_af, existing, sift, polyphen,
+          clinvar: {clnsig, clndn, clnrevstat, clnhgvs}
+        """
+        try:
+            import pysam
+        except ImportError:
+            logger.warning("[sgnipt] pysam not available — skipping VEP VCF parsing")
+            return {}
+
+        result: Dict[Tuple, Dict] = {}
+
+        # CSQ 필드 순서 파싱
+        csq_fields: List[str] = []
+        try:
+            vcf = pysam.VariantFile(vep_vcf_path, "r")
+        except Exception as e:
+            logger.warning("[sgnipt] Cannot open VEP VCF %s: %s", vep_vcf_path, e)
+            return {}
+
+        try:
+            csq_meta = vcf.header.info.get("CSQ")
+            if csq_meta:
+                desc = csq_meta.description or ""
+                m = re.search(r"Format:\s*(.+)$", desc)
+                if m:
+                    csq_fields = [f.strip() for f in m.group(1).split("|")]
+        except Exception as e:
+            logger.warning("[sgnipt] CSQ header parse failed: %s", e)
+
+        if not csq_fields:
+            logger.warning("[sgnipt] CSQ field list not found in VEP VCF header — skipping")
+            vcf.close()
+            return {}
+
+        def _idx(name: str) -> int:
+            try:
+                return csq_fields.index(name)
+            except ValueError:
+                return -1
+
+        fi = {
+            "consequence":    _idx("Consequence"),
+            "impact":         _idx("IMPACT"),
+            "symbol":         _idx("SYMBOL"),
+            "feature":        _idx("Feature"),
+            "hgvsc":          _idx("HGVSc"),
+            "hgvsp":          _idx("HGVSp"),
+            "existing":       _idx("Existing_variation"),
+            "canonical":      _idx("CANONICAL"),
+            "mane_select":    _idx("MANE_SELECT"),
+            "sift":           _idx("SIFT"),
+            "polyphen":       _idx("PolyPhen"),
+            "gnomad_af":      _idx("gnomADe_AF"),
+            "gnomad_af_g":    _idx("gnomADg_AF"),
+            "clnsig":         _idx("ClinVar_CLNSIG"),
+            "clndn":          _idx("ClinVar_CLNDN"),
+            "clnrevstat":     _idx("ClinVar_CLNREVSTAT"),
+            "clnhgvs":        _idx("ClinVar_CLNHGVS"),
+        }
+
+        def _get(parts: List[str], key: str) -> str:
+            idx = fi.get(key, -1)
+            if idx < 0 or idx >= len(parts):
+                return ""
+            v = parts[idx]
+            return "" if v in ("", ".") else v
+
+        def _pick_transcript(csq_entries: List[List[str]]) -> Optional[List[str]]:
+            # 1순위: MANE_SELECT
+            for p in csq_entries:
+                if _get(p, "mane_select"):
+                    return p
+            # 2순위: CANONICAL
+            for p in csq_entries:
+                if _get(p, "canonical") == "YES":
+                    return p
+            return csq_entries[0] if csq_entries else None
+
+        def _gnomad_af(parts: List[str]) -> Optional[float]:
+            for key in ("gnomad_af", "gnomad_af_g"):
+                v = _get(parts, key)
+                if v:
+                    try:
+                        return float(v)
+                    except ValueError:
+                        pass
+            return None
+
+        try:
+            for rec in vcf.fetch():
+                chrom = rec.chrom
+                pos = rec.pos  # 1-based in pysam
+                ref = rec.ref
+                alts = rec.alts or ()
+                csq_raw = rec.info.get("CSQ")
+                if not csq_raw:
+                    continue
+                # pysam returns tuple for multi-value INFO
+                if isinstance(csq_raw, str):
+                    csq_list = csq_raw.split(",")
+                else:
+                    csq_list = list(csq_raw)
+
+                # group by alt allele
+                for alt in alts:
+                    entries = []
+                    for csq_str in csq_list:
+                        parts = csq_str.split("|")
+                        if not parts:
+                            continue
+                        # Allele field matches alt (or is simplified alt)
+                        allele = parts[0]
+                        if allele == alt or allele == alt[0] or not allele:
+                            entries.append(parts)
+                    if not entries:
+                        entries = [p.split("|") for p in csq_list]
+
+                    best = _pick_transcript(entries)
+                    if not best:
+                        continue
+
+                    gnomad = _gnomad_af(best)
+                    clnsig = _get(best, "clnsig").replace("&", "/").replace("_", " ")
+                    clndn = _get(best, "clndn").replace("_", " ").replace("&", " / ")
+                    clnrevstat = _get(best, "clnrevstat")
+                    clnhgvs = _get(best, "clnhgvs")
+
+                    vep_entry: Dict[str, Any] = {
+                        "hgvsc":       _get(best, "hgvsc"),
+                        "hgvsp":       _get(best, "hgvsp"),
+                        "consequence": _get(best, "consequence"),
+                        "impact":      _get(best, "impact"),
+                        "symbol":      _get(best, "symbol"),
+                        "mane":        _get(best, "mane_select") or _get(best, "feature"),
+                        "gnomad_af":   gnomad,
+                        "existing":    _get(best, "existing"),
+                        "sift":        _get(best, "sift"),
+                        "polyphen":    _get(best, "polyphen"),
+                        "clinvar": {
+                            "clnsig":      clnsig,
+                            "clndn":       clndn,
+                            "clnrevstat":  clnrevstat,
+                            "clnhgvs":     clnhgvs,
+                        } if (clnsig or clndn) else None,
+                    }
+                    key = (chrom, pos, ref, alt)
+                    result[key] = vep_entry
+        except Exception as e:
+            logger.warning("[sgnipt] VEP VCF fetch error: %s", e)
+        finally:
+            vcf.close()
+
+        logger.info("[sgnipt] VEP VCF parsed: %d variants annotated from %s", len(result), vep_vcf_path)
+        return result
+
+    @staticmethod
+    def _enrich_findings_with_vep(
+        findings: List[Dict[str, Any]],
+        vep_lookup: Dict[Tuple, Dict],
+        vep_annotated: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """clinical_findings 각 항목에 vep 서브오브젝트를 추가합니다."""
+        if not vep_lookup:
+            return findings
+        enriched = []
+        for v in findings:
+            chrom = v.get("chrom", "")
+            pos = v.get("pos")
+            ref = v.get("ref", "")
+            alt = v.get("alt", "")
+            if pos is None:
+                enriched.append(v)
+                continue
+            key = (chrom, int(pos), ref, alt)
+            # chr prefix 유무 양쪽 시도
+            vep_data = vep_lookup.get(key)
+            if vep_data is None:
+                alt_chrom = chrom.replace("chr", "") if chrom.startswith("chr") else f"chr{chrom}"
+                vep_data = vep_lookup.get((alt_chrom, int(pos), ref, alt))
+            if vep_data:
+                entry = dict(v)
+                entry["vep"] = vep_data
+                enriched.append(entry)
+            else:
+                enriched.append(v)
+        return enriched
+
+    @staticmethod
     def _find_variant_report_json(analysis_dir: Optional[str], output_dir: Optional[str], sample_id: str) -> Optional[str]:
         """
         variant_report.json 위치를 탐색합니다.
@@ -896,6 +1110,24 @@ class SgNIPTPlugin(ServicePlugin):
                 )
 
             merged = self._build_merged_result(summary, vr, job.analysis_dir)
+
+            # VEP VCF 파싱 → clinical_findings 에 vep 서브오브젝트 추가
+            vep_vcf = self._find_vep_vcf(job.analysis_dir, sample_id)
+            if vep_vcf:
+                logger.info("[sgnipt] VEP VCF found at %s — enriching clinical_findings", vep_vcf)
+                vep_lookup = self._parse_vep_vcf(vep_vcf)
+                if vep_lookup:
+                    merged["clinical_findings"] = self._enrich_findings_with_vep(
+                        merged.get("clinical_findings") or [], vep_lookup, vep_annotated=True
+                    )
+                    merged["all_target_variants"] = self._enrich_findings_with_vep(
+                        merged.get("all_target_variants") or [], vep_lookup, vep_annotated=True
+                    )
+                    merged["vep_annotated"] = True
+            else:
+                logger.info("[sgnipt] VEP VCF not found for sample %s — skipping VEP enrichment", sample_id)
+                merged["vep_annotated"] = False
+
             text = json.dumps(merged, ensure_ascii=False, indent=2, default=str)
             with open(dst, "w", encoding="utf-8") as f:
                 f.write(text)

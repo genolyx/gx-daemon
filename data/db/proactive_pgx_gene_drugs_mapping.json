@@ -1,0 +1,269 @@
+{
+  "genes": [
+    {
+      "gene": "ABCB1",
+      "drugs_en": "tacrolimus, digoxin, cyclosporine, fexofenadine, methotrexate, modafinil, irinotecan",
+      "drugs_cn": "tacrolimus, digoxin, cyclosporine, fexofenadine, methotrexate, modafinil, irinotecan",
+      "drugs_ko": "tacrolimus, digoxin, cyclosporine, fexofenadine, methotrexate, modafinil, irinotecan"
+    },
+    {
+      "gene": "ABCG2",
+      "drugs_en": "rosuvastatin, topotecan, sulfasalazine",
+      "drugs_cn": "rosuvastatin, topotecan, sulfasalazine",
+      "drugs_ko": "rosuvastatin, topotecan, sulfasalazine"
+    },
+    {
+      "gene": "ACE",
+      "drugs_en": "enalapril, captopril, lisinopril, ramipril",
+      "drugs_cn": "enalapril, captopril, lisinopril, ramipril",
+      "drugs_ko": "enalapril, captopril, lisinopril, ramipril"
+    },
+    {
+      "gene": "ANKK1",
+      "drugs_en": "haloperidol, naltrexone, aripiprazole, bromocriptine",
+      "drugs_cn": "haloperidol, naltrexone, aripiprazole, bromocriptine",
+      "drugs_ko": "haloperidol, naltrexone, aripiprazole, bromocriptine"
+    },
+    {
+      "gene": "APOE",
+      "drugs_en": "statins (atorvastatin, simvastatin), donepezil, tacrine",
+      "drugs_cn": "statins (atorvastatin, simvastatin), donepezil, tacrine",
+      "drugs_ko": "statins (atorvastatin, simvastatin), donepezil, tacrine"
+    },
+    {
+      "gene": "ATM",
+      "drugs_en": "cisplatin, carboplatin, radiotherapy",
+      "drugs_cn": "cisplatin, carboplatin, radiotherapy",
+      "drugs_ko": "cisplatin, carboplatin, radiotherapy"
+    },
+    {
+      "gene": "BCHE",
+      "drugs_en": "succinylcholine, mivacurium",
+      "drugs_cn": "succinylcholine, mivacurium",
+      "drugs_ko": "succinylcholine, mivacurium"
+    },
+    {
+      "gene": "CACNA1S",
+      "drugs_en": "volatile anesthetics, succinylcholine",
+      "drugs_cn": "volatile anesthetics, succinylcholine",
+      "drugs_ko": "volatile anesthetics, succinylcholine"
+    },
+    {
+      "gene": "COMT",
+      "drugs_en": "morphine, opioids, amphetamine, levodopa",
+      "drugs_cn": "morphine, opioids, amphetamine, levodopa",
+      "drugs_ko": "morphine, opioids, amphetamine, levodopa"
+    },
+    {
+      "gene": "CYP2B6",
+      "drugs_en": "efavirenz",
+      "drugs_cn": "efavirenz",
+      "drugs_ko": "efavirenz"
+    },
+    {
+      "gene": "CYP2C19",
+      "drugs_en": "clopidogrel, voriconazole, SSRIs, PPIs",
+      "drugs_cn": "clopidogrel, voriconazole, SSRIs, PPIs",
+      "drugs_ko": "clopidogrel, voriconazole, SSRIs, PPIs"
+    },
+    {
+      "gene": "CYP2C8",
+      "drugs_en": "paclitaxel, amodiaquine, repaglinide, rosiglitazone",
+      "drugs_cn": "paclitaxel, amodiaquine, repaglinide, rosiglitazone",
+      "drugs_ko": "paclitaxel, amodiaquine, repaglinide, rosiglitazone"
+    },
+    {
+      "gene": "CYP2C9",
+      "drugs_en": "warfarin, celecoxib, phenytoin, NSAIDs",
+      "drugs_cn": "warfarin, celecoxib, phenytoin, NSAIDs",
+      "drugs_ko": "warfarin, celecoxib, phenytoin, NSAIDs"
+    },
+    {
+      "gene": "CYP2D6",
+      "drugs_en": "codeine, tramadol, tamoxifen, TCAs, ondansetron",
+      "drugs_cn": "codeine, tramadol, tamoxifen, TCAs, ondansetron",
+      "drugs_ko": "codeine, tramadol, tamoxifen, TCAs, ondansetron"
+    },
+    {
+      "gene": "CYP3A4",
+      "drugs_en": "tacrolimus, statins, cyclosporine, midazolam, atorvastatin, simvastatin, cyclophosphamide",
+      "drugs_cn": "tacrolimus, statins, cyclosporine, midazolam, atorvastatin, simvastatin, cyclophosphamide",
+      "drugs_ko": "tacrolimus, statins, cyclosporine, midazolam, atorvastatin, simvastatin, cyclophosphamide"
+    },
+    {
+      "gene": "CYP3A5",
+      "drugs_en": "tacrolimus",
+      "drugs_cn": "tacrolimus",
+      "drugs_ko": "tacrolimus"
+    },
+    {
+      "gene": "CYP4F2",
+      "drugs_en": "warfarin",
+      "drugs_cn": "warfarin",
+      "drugs_ko": "warfarin"
+    },
+    {
+      "gene": "DPYD",
+      "drugs_en": "fluoropyrimidines (5-FU, capecitabine)",
+      "drugs_cn": "fluoropyrimidines (5-FU, capecitabine)",
+      "drugs_ko": "fluoropyrimidines (5-FU, capecitabine)"
+    },
+    {
+      "gene": "DRD2",
+      "drugs_en": "risperidone, haloperidol, aripiprazole",
+      "drugs_cn": "risperidone, haloperidol, aripiprazole",
+      "drugs_ko": "risperidone, haloperidol, aripiprazole"
+    },
+    {
+      "gene": "ERCC1",
+      "drugs_en": "cisplatin, oxaliplatin, carboplatin",
+      "drugs_cn": "cisplatin, oxaliplatin, carboplatin",
+      "drugs_ko": "cisplatin, oxaliplatin, carboplatin"
+    },
+    {
+      "gene": "F2",
+      "drugs_en": "warfarin, hormonal contraceptives, HRT",
+      "drugs_cn": "warfarin, hormonal contraceptives, HRT",
+      "drugs_ko": "warfarin, hormonal contraceptives, HRT"
+    },
+    {
+      "gene": "F5",
+      "drugs_en": "warfarin, hormonal contraceptives, HRT",
+      "drugs_cn": "warfarin, hormonal contraceptives, HRT",
+      "drugs_ko": "warfarin, hormonal contraceptives, HRT"
+    },
+    {
+      "gene": "G6PD",
+      "drugs_en": "rasburicase, dapsone, primaquine, sulfonamides",
+      "drugs_cn": "rasburicase, dapsone, primaquine, sulfonamides",
+      "drugs_ko": "rasburicase, dapsone, primaquine, sulfonamides"
+    },
+    {
+      "gene": "GGCX",
+      "drugs_en": "warfarin",
+      "drugs_cn": "warfarin",
+      "drugs_ko": "warfarin"
+    },
+    {
+      "gene": "GRIK4",
+      "drugs_en": "citalopram",
+      "drugs_cn": "citalopram",
+      "drugs_ko": "citalopram"
+    },
+    {
+      "gene": "GSTP1",
+      "drugs_en": "cisplatin, oxaliplatin, cyclophosphamide, doxorubicin",
+      "drugs_cn": "cisplatin, oxaliplatin, cyclophosphamide, doxorubicin",
+      "drugs_ko": "cisplatin, oxaliplatin, cyclophosphamide, doxorubicin"
+    },
+    {
+      "gene": "HTR1A",
+      "drugs_en": "paroxetine, fluvoxamine, SSRIs",
+      "drugs_cn": "paroxetine, fluvoxamine, SSRIs",
+      "drugs_ko": "paroxetine, fluvoxamine, SSRIs"
+    },
+    {
+      "gene": "HTR2A",
+      "drugs_en": "citalopram, paroxetine, SSRIs",
+      "drugs_cn": "citalopram, paroxetine, SSRIs",
+      "drugs_ko": "citalopram, paroxetine, SSRIs"
+    },
+    {
+      "gene": "HTR2C",
+      "drugs_en": "olanzapine, clozapine, risperidone",
+      "drugs_cn": "olanzapine, clozapine, risperidone",
+      "drugs_ko": "olanzapine, clozapine, risperidone"
+    },
+    {
+      "gene": "IFNL4",
+      "drugs_en": "peginterferon alfa-2a, peginterferon alfa-2b, ribavirin",
+      "drugs_cn": "peginterferon alfa-2a, peginterferon alfa-2b, ribavirin",
+      "drugs_ko": "peginterferon alfa-2a, peginterferon alfa-2b, ribavirin"
+    },
+    {
+      "gene": "ITPA",
+      "drugs_en": "ribavirin, azathioprine, mercaptopurine",
+      "drugs_cn": "ribavirin, azathioprine, mercaptopurine",
+      "drugs_ko": "ribavirin, azathioprine, mercaptopurine"
+    },
+    {
+      "gene": "KIF6",
+      "drugs_en": "pravastatin, atorvastatin (disputed)",
+      "drugs_cn": "pravastatin, atorvastatin (disputed)",
+      "drugs_ko": "pravastatin, atorvastatin (disputed)"
+    },
+    {
+      "gene": "MTHFR",
+      "drugs_en": "methotrexate, fluorouracil, capecitabine, folic acid",
+      "drugs_cn": "methotrexate, fluorouracil, capecitabine, folic acid",
+      "drugs_ko": "methotrexate, fluorouracil, capecitabine, folic acid"
+    },
+    {
+      "gene": "NAT2",
+      "drugs_en": "isoniazid, hydralazine, sulfasalazine, procainamide",
+      "drugs_cn": "isoniazid, hydralazine, sulfasalazine, procainamide",
+      "drugs_ko": "isoniazid, hydralazine, sulfasalazine, procainamide"
+    },
+    {
+      "gene": "NQO1",
+      "drugs_en": "mitomycin C, benzene",
+      "drugs_cn": "mitomycin C, benzene",
+      "drugs_ko": "mitomycin C, benzene"
+    },
+    {
+      "gene": "NUDT15",
+      "drugs_en": "azathioprine, mercaptopurine, thioguanine",
+      "drugs_cn": "azathioprine, mercaptopurine, thioguanine",
+      "drugs_ko": "azathioprine, mercaptopurine, thioguanine"
+    },
+    {
+      "gene": "OPRM1",
+      "drugs_en": "morphine, codeine, fentanyl, naltrexone (modest effect)",
+      "drugs_cn": "morphine, codeine, fentanyl, naltrexone (modest effect)",
+      "drugs_ko": "morphine, codeine, fentanyl, naltrexone (modest effect)"
+    },
+    {
+      "gene": "RYR1",
+      "drugs_en": "volatile anesthetics, succinylcholine, caffeine",
+      "drugs_cn": "volatile anesthetics, succinylcholine, caffeine",
+      "drugs_ko": "volatile anesthetics, succinylcholine, caffeine"
+    },
+    {
+      "gene": "SLCO1B1",
+      "drugs_en": "simvastatin, atorvastatin, rosuvastatin",
+      "drugs_cn": "simvastatin, atorvastatin, rosuvastatin",
+      "drugs_ko": "simvastatin, atorvastatin, rosuvastatin"
+    },
+    {
+      "gene": "TPMT",
+      "drugs_en": "azathioprine, mercaptopurine, thioguanine",
+      "drugs_cn": "azathioprine, mercaptopurine, thioguanine",
+      "drugs_ko": "azathioprine, mercaptopurine, thioguanine"
+    },
+    {
+      "gene": "UGT1A1",
+      "drugs_en": "irinotecan, atazanavir",
+      "drugs_cn": "irinotecan, atazanavir",
+      "drugs_ko": "irinotecan, atazanavir"
+    },
+    {
+      "gene": "UGT1A4",
+      "drugs_en": "lamotrigine, olanzapine",
+      "drugs_cn": "lamotrigine, olanzapine",
+      "drugs_ko": "lamotrigine, olanzapine"
+    },
+    {
+      "gene": "VKORC1",
+      "drugs_en": "warfarin",
+      "drugs_cn": "warfarin",
+      "drugs_ko": "warfarin"
+    },
+    {
+      "gene": "XRCC1",
+      "drugs_en": "cisplatin, oxaliplatin, carboplatin",
+      "drugs_cn": "cisplatin, oxaliplatin, carboplatin",
+      "drugs_ko": "cisplatin, oxaliplatin, carboplatin"
+    }
+  ],
+  "count": 44
+}

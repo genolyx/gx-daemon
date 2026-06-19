@@ -18,6 +18,19 @@
         }
         @page :first { @top-right { content: none; } }
 
+        @page microdeletion {
+            size: Letter;
+            margin: 0.5in 0.5in 0.65in 0.5in;
+            @top-right { content: element(headerContent); }
+            @bottom-left { content: element(footerContent); }
+            @bottom-right {
+                content: "Page " counter(page) " of " counter(pages);
+                font-family: 'Helvetica Neue', Arial, sans-serif;
+                font-size: 8pt;
+                color: #94a3b8;
+            }
+        }
+
         :root {
             --brand-primary: #0f172a;
             --accent-blue: #65c3c2;
@@ -25,13 +38,17 @@
             --bg-summary: #f8fafc;
             --text-main: #334155;
             --text-muted: #64748b;
+            --table-header-bg: #eef9f9;
+            --table-header-border: #b8e8e7;
         }
 
         body {
             font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-            line-height: 1.3;
+            line-height: 1.35;
             color: var(--text-main);
             margin: 0;
+            font-stretch: normal;
+            letter-spacing: normal;
         }
 
         #header-content {
@@ -136,6 +153,7 @@
             color: #64748b;
             text-transform: uppercase;
             font-weight: 500;
+            letter-spacing: 0.025em;
             margin-right: 4px;
         }
         .value { display: inline; color: #1e293b; }
@@ -169,6 +187,7 @@
             color: var(--text-muted);
             text-transform: uppercase;
             font-weight: 500;
+            letter-spacing: 0.025em;
             margin-right: 4px;
         }
         .banner-meta-value {
@@ -184,6 +203,7 @@
             color: #0f172a;
             padding-bottom: 4px;
             text-transform: uppercase;
+            letter-spacing: 0.02em;
             display: block;
             width: 100%;
         }
@@ -191,18 +211,21 @@
 
         .results-table {
             width: 100%;
-            border-collapse: collapse;
+            border-collapse: separate;
+            border-spacing: 0;
             margin-bottom: 14px;
             table-layout: fixed;
         }
         .results-table thead th {
             text-align: left;
             font-size: 8pt;
-            color: #64748b;
-            border-bottom: 1.5px solid #cbd5e1;
+            color: #475569;
+            background-color: var(--table-header-bg);
+            border-bottom: 1.5px solid var(--table-header-border);
             padding: 5px 8px 5px 5px;
             text-transform: uppercase;
             font-weight: 500;
+            letter-spacing: 0.025em;
         }
         .results-table thead th:last-child { padding-right: 10px; }
         .results-table tbody td {
@@ -210,9 +233,11 @@
             padding: 6px 8px 6px 5px;
             border-bottom: 1px solid #f1f5f9;
             font-size: 7.5pt;
-            vertical-align: top;
-            line-height: 1.35;
+            vertical-align: middle;
+            line-height: 1.4;
         }
+        .results-table tbody tr.row-odd td { background-color: #ffffff; }
+        .results-table tbody tr.row-even td { background-color: #f8fafc; }
         .results-table tbody td:last-child { padding-right: 10px; }
         .results-table tbody td.col-condition {
             color: #334155;
@@ -229,31 +254,37 @@
 
         .summary-table {
             width: 100%;
-            border-collapse: collapse;
+            border-collapse: separate;
+            border-spacing: 0;
             margin-bottom: 25px;
         }
         .summary-table th {
             text-align: left;
             font-size: 8pt;
-            color: #64748b;
-            border-bottom: 1.5px solid #cbd5e1;
+            color: #475569;
+            background-color: var(--table-header-bg);
+            border-bottom: 1.5px solid var(--table-header-border);
             padding: 4px 5px;
             text-transform: uppercase;
             font-weight: 500;
+            letter-spacing: 0.025em;
         }
         .summary-table td {
             padding: 8px 5px;
             border-bottom: 1px solid #f1f5f9;
             font-size: 8pt;
-            vertical-align: top;
+            vertical-align: middle;
+            line-height: 1.4;
             color: #334155;
         }
+        .summary-table tbody tr.row-odd td { background-color: #ffffff; }
+        .summary-table tbody tr.row-even td { background-color: #f8fafc; }
 
         .clinical-statement {
             font-size: 7.5pt;
             color: #64748b;
-            line-height: 1.42;
-            text-align: justify;
+            line-height: 1.45;
+            text-align: left;
             margin-bottom: 0;
             margin-top: 4px;
             background: var(--bg-summary);
@@ -268,30 +299,33 @@
             font-size: 8pt;
             color: #334155;
             margin: 2px 0 0 0;
-            text-align: justify;
-            line-height: 1.3;
+            text-align: left;
+            line-height: 1.45;
         }
         .detail-text p { margin: 0 0 8px 0; }
         .detail-text ol {
             margin: 0;
             padding-left: 18px;
             font-size: 7.5pt;
-            line-height: 1.35;
+            line-height: 1.4;
         }
 
         .dense-table {
             width: 100%;
-            border-collapse: collapse;
+            border-collapse: separate;
+            border-spacing: 0;
             margin-bottom: 0;
         }
         .dense-table th {
             text-align: left;
             font-size: 7pt;
-            color: #64748b;
-            border-bottom: 1.5px solid #cbd5e1;
+            color: #475569;
+            background-color: var(--table-header-bg);
+            border-bottom: 1.5px solid var(--table-header-border);
             padding: 3px 4px;
             text-transform: uppercase;
             font-weight: 500;
+            letter-spacing: 0.025em;
         }
         .dense-table td {
             padding: 3px 4px;
@@ -302,55 +336,70 @@
             color: #475569;
             font-weight: 400;
         }
+        .dense-table tbody tr.row-odd td { background-color: #ffffff; }
+        .dense-table tbody tr.row-even td { background-color: #f8fafc; }
 
         /* Page 3 — comprehensive microdeletion panel (single page, fill sheet) */
+        .page-microdeletion {
+            page: microdeletion;
+        }
         .page-microdeletion .brand-header {
-            margin-bottom: 8px;
-            padding-bottom: 4px;
+            margin-bottom: 5px;
+            padding-bottom: 3px;
         }
         .page-microdeletion .brand-name {
-            font-size: 14pt;
-            line-height: 28px;
+            font-size: 13.5pt;
+            line-height: 26px;
         }
         .page-microdeletion .brand-subtitle {
-            font-size: 8pt;
-            line-height: 30px;
+            font-size: 7.5pt;
+            line-height: 28px;
             margin-left: 8px;
         }
         .page-microdeletion .brand-logo {
-            line-height: 28px;
+            line-height: 26px;
         }
         .page-microdeletion .brand-logo img {
-            height: 28px;
+            height: 26px;
         }
         .page-microdeletion .section-title {
             margin-top: 0;
-            margin-bottom: 6px;
+            margin-bottom: 5px;
             font-size: 9pt;
             padding-bottom: 2px;
         }
         .dense-table.dense-table-panel th,
         .dense-table.dense-table-panel td {
-            padding: 2px 4px;
+            padding: 2px 5px;
             font-size: 5.5pt;
-            line-height: 1.1;
-            vertical-align: top;
-            text-align: left;
-            word-break: break-word;
-            hyphens: auto;
+            line-height: 1.25;
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            font-weight: 400;
+            letter-spacing: normal;
+            overflow-wrap: break-word;
         }
         .dense-table.dense-table-panel thead th {
             font-size: 5.5pt;
-            padding: 3px 4px;
-            line-height: 1.1;
-            border-bottom: 1px solid #cbd5e1;
+            padding: 3px 5px;
+            line-height: 1.2;
+            border-bottom: 1px solid var(--table-header-border);
+            background-color: var(--table-header-bg);
+            color: #475569;
+            font-weight: 500;
+            letter-spacing: 0.02em;
+            text-align: center;
+            vertical-align: middle;
         }
         .dense-table.dense-table-panel tbody tr {
-            height: 17pt;
+            height: 18pt;
         }
         .dense-table.dense-table-panel tbody td {
             border-bottom: 1px solid #f1f5f9;
+            text-align: center;
+            vertical-align: middle;
         }
+        .dense-table.dense-table-panel tbody tr.row-odd td { background-color: #ffffff; }
+        .dense-table.dense-table-panel tbody tr.row-even td { background-color: #f8fafc; }
 
         .screen-footer {
             display: none;
@@ -460,7 +509,7 @@
         </thead>
         <tbody>
             
-            <tr>
+            <tr class="row-odd">
                 
                 <td class="col-condition">Trisomy 21 (Down Syndrome)</td>
                 <td class="col-result ">Low Risk</td>
@@ -471,7 +520,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-even">
                 
                 <td class="col-condition">Trisomy 18 (Edwards Syndrome)</td>
                 <td class="col-result ">Low Risk</td>
@@ -482,7 +531,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-odd">
                 
                 <td class="col-condition">Trisomy 13 (Patau Syndrome)</td>
                 <td class="col-result ">Low Risk</td>
@@ -493,7 +542,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-even">
                 
                 <td class="col-condition">All Other Autosomal Trisomy</td>
                 <td class="col-result ">Low Risk</td>
@@ -504,7 +553,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-odd">
                 
                 <td class="col-condition">XO (Turner Syndrome)</td>
                 <td class="col-result ">Low Risk</td>
@@ -515,7 +564,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-even">
                 
                 <td class="col-condition">XXY (Klinefelter Syndrome)</td>
                 <td class="col-result ">Low Risk</td>
@@ -542,7 +591,7 @@
         </thead>
         <tbody>
             
-            <tr>
+            <tr class="row-odd">
                 
                 <td class="col-condition">1p36 deletion syndrome</td>
                 <td class="col-result ">Low Risk</td>
@@ -553,7 +602,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-even">
                 
                 <td class="col-condition">Williams-Beuren syndrome</td>
                 <td class="col-result ">Low Risk</td>
@@ -564,7 +613,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-odd">
                 
                 <td class="col-condition">Cri Du Chat syndrome</td>
                 <td class="col-result ">Low Risk</td>
@@ -575,7 +624,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-even">
                 
                 <td class="col-condition">DiGeorge syndrome (22q11.2)</td>
                 <td class="col-result ">Low Risk</td>
@@ -586,7 +635,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-odd">
                 
                 <td class="col-condition">Other microdeletions/duplications</td>
                 <td class="col-result ">Low Risk</td>
@@ -628,16 +677,16 @@
             </tr>
         </thead>
         <tbody>
-            <tr><td>Trisomy 21</td><td>99.72%</td><td>&gt;99%</td><td>98.72%</td></tr>
-            <tr><td>Trisomy 18</td><td>99.04%</td><td>&gt;99%</td><td>96.49%</td></tr>
-            <tr><td>Trisomy 13</td><td>98.84%</td><td>&gt;99%</td><td>85.71%</td></tr>
-            <tr><td>Monosomy X</td><td>&gt;99%</td><td>&gt;99%</td><td>76%</td></tr>
-            <tr><td>XXX</td><td>&gt;99%</td><td>&gt;99%</td><td>&gt;99%</td></tr>
-            <tr><td>XXY</td><td>&gt;99%</td><td>&gt;99%</td><td>&gt;99%</td></tr>
-            <tr><td>XYY</td><td>&gt;99%</td><td>&gt;99%</td><td>&gt;99%</td></tr>
-            <tr><td>T9, T16, T22</td><td>&gt;99%</td><td>&gt;99%</td><td>50–99%</td></tr>
-            <tr><td>All Other Trisomy</td><td>&gt;99%</td><td>&gt;99%</td><td>NA</td></tr>
-            <tr><td>Microdeletions / duplications</td><td>20–99%</td><td>&gt;99%</td><td>NA</td></tr>
+            <tr class="row-odd"><td>Trisomy 21</td><td>99.72%</td><td>&gt;99%</td><td>98.72%</td></tr>
+            <tr class="row-even"><td>Trisomy 18</td><td>99.04%</td><td>&gt;99%</td><td>96.49%</td></tr>
+            <tr class="row-odd"><td>Trisomy 13</td><td>98.84%</td><td>&gt;99%</td><td>85.71%</td></tr>
+            <tr class="row-even"><td>Monosomy X</td><td>&gt;99%</td><td>&gt;99%</td><td>76%</td></tr>
+            <tr class="row-odd"><td>XXX</td><td>&gt;99%</td><td>&gt;99%</td><td>&gt;99%</td></tr>
+            <tr class="row-even"><td>XXY</td><td>&gt;99%</td><td>&gt;99%</td><td>&gt;99%</td></tr>
+            <tr class="row-odd"><td>XYY</td><td>&gt;99%</td><td>&gt;99%</td><td>&gt;99%</td></tr>
+            <tr class="row-even"><td>T9, T16, T22</td><td>&gt;99%</td><td>&gt;99%</td><td>50–99%</td></tr>
+            <tr class="row-odd"><td>All Other Trisomy</td><td>&gt;99%</td><td>&gt;99%</td><td>NA</td></tr>
+            <tr class="row-even"><td>Microdeletions / duplications</td><td>20–99%</td><td>&gt;99%</td><td>NA</td></tr>
         </tbody>
     </table>
 
@@ -664,7 +713,7 @@
 <div class="new-page page-microdeletion">
     <div class="brand-header">
         <div class="brand-name">Non-Invasive Prenatal Screening</div>
-        <div class="brand-subtitle">Comprehensive Microdeletion Panel</div>
+        <div class="brand-subtitle">Comprehensive Microdeletion/Duplication Panel</div>
         <div class="brand-logo"><img src="genolyx_logo.png" alt="Genolyx"></div>
     </div>
 
@@ -680,7 +729,7 @@
         </thead>
         <tbody>
             
-            <tr>
+            <tr class="row-odd">
                 
                 <td>1p36 terminal region (includes GABRD) gain</td>
                 
@@ -693,7 +742,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-even">
                 
                 <td>1q21.1 recurrent region (distal, BP3-BP4) (includes GJA5) loss</td>
                 
@@ -706,7 +755,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-odd">
                 
                 <td>1q21.1 recurrent region (distal, BP3-BP4) (includes GJA5) gain</td>
                 
@@ -719,7 +768,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-even">
                 
                 <td>1q43-q44 terminal region (includes AKT3)</td>
                 
@@ -732,7 +781,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-odd">
                 
                 <td>Partial monosomy 1p</td>
                 
@@ -745,7 +794,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-even">
                 
                 <td>Monosomy 1q21-q32</td>
                 
@@ -758,7 +807,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-odd">
                 
                 <td>Monosomy 1q42-qter</td>
                 
@@ -771,7 +820,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-even">
                 
                 <td>Trisomy 1q23-qter</td>
                 
@@ -784,7 +833,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-odd">
                 
                 <td>2p15-p16.1 region (includes BCL11A)</td>
                 
@@ -797,7 +846,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-even">
                 
                 <td>2p24.3 MYCN-DDX1 duplication region</td>
                 
@@ -810,7 +859,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-odd">
                 
                 <td>2q11.2 recurrent region (includes ARID5A, TMEM127)</td>
                 
@@ -823,7 +872,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-even">
                 
                 <td>2q13 recurrent region (distal) (includes BCL2L11) gain</td>
                 
@@ -836,7 +885,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-odd">
                 
                 <td>2q13 recurrent region (distal) (includes BCL2L11) loss</td>
                 
@@ -849,7 +898,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-even">
                 
                 <td>Partial monosomy 2p</td>
                 
@@ -862,7 +911,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-odd">
                 
                 <td>Partial trisomy 2p</td>
                 
@@ -875,7 +924,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-even">
                 
                 <td>Partial monosomy 2q</td>
                 
@@ -888,7 +937,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-odd">
                 
                 <td>Partial trisomy 2q</td>
                 
@@ -901,7 +950,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-even">
                 
                 <td>3q24 Region (includes ZIC1)</td>
                 
@@ -914,7 +963,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-odd">
                 
                 <td>3q29 recurrent region (includes DLG1)</td>
                 
@@ -927,7 +976,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-even">
                 
                 <td>Monosomy 3p11-p21</td>
                 
@@ -940,7 +989,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-odd">
                 
                 <td>Monosomy 3p25-pter</td>
                 
@@ -953,7 +1002,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-even">
                 
                 <td>Partial trisomy 3p</td>
                 
@@ -966,7 +1015,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-odd">
                 
                 <td>Partial monosomy 3q</td>
                 
@@ -979,7 +1028,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-even">
                 
                 <td>Partial trisomy 3q</td>
                 
@@ -992,7 +1041,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-odd">
                 
                 <td>Partial monosomy 3p</td>
                 
@@ -1005,7 +1054,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-even">
                 
                 <td>4p16.3 terminal (Wolf-Hirschhorn syndrome) region gain</td>
                 
@@ -1018,7 +1067,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-odd">
                 
                 <td>Partial monosomy 4p</td>
                 
@@ -1031,7 +1080,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-even">
                 
                 <td>Partial trisomy 4p</td>
                 
@@ -1044,7 +1093,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-odd">
                 
                 <td>Monosomy 4q21-q31</td>
                 
@@ -1057,7 +1106,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-even">
                 
                 <td>Monosomy 4q31-qter</td>
                 
@@ -1070,7 +1119,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-odd">
                 
                 <td>Partial trisomy 4q</td>
                 
@@ -1083,7 +1132,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-even">
                 
                 <td>Partial monosomy 4p</td>
                 
@@ -1096,7 +1145,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-odd">
                 
                 <td>5p15 terminal (Cri du chat syndrome) region gain</td>
                 
@@ -1109,7 +1158,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-even">
                 
                 <td>5q35 recurrent (Sotos syndrome) region (includes NSD1) gain</td>
                 
@@ -1122,7 +1171,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-odd">
                 
                 <td>5q35 recurrent (Sotos syndrome) region (includes NSD1) loss</td>
                 
@@ -1135,7 +1184,7 @@
                 
             </tr>
             
-            <tr>
+            <tr class="row-even">
                 
                 <td></td>
                 

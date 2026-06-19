@@ -879,8 +879,15 @@ APOE_PROACTIVE_DIPLOTYPE_BODIES: Dict[str, str] = {
 }
 
 
-def _apoe_proactive_pdf_alert_html(report_key: str) -> str:
+def _apoe_proactive_pdf_alert_html(report_key: str, lang: str = "EN") -> str:
     """Prominent alert strip for customer PDF (risk tier or unresolved phase)."""
+    lang_u = (lang or "EN").strip().upper()
+    if lang_u == "CN":
+        return _apoe_proactive_pdf_alert_html_cn(report_key)
+    return _apoe_proactive_pdf_alert_html_en(report_key)
+
+
+def _apoe_proactive_pdf_alert_html_en(report_key: str) -> str:
     rk = (report_key or "").strip()
     if rk in ("ε2/ε4", "ε3/ε4", "ε4/ε4"):
         labels = {
@@ -909,14 +916,360 @@ def _apoe_proactive_pdf_alert_html(report_key: str) -> str:
     return ""
 
 
-def build_apoe_proactive_pdf_html(report_key: str) -> str:
+def _apoe_proactive_pdf_alert_html_cn(report_key: str) -> str:
+    rk = (report_key or "").strip()
+    if rk in ("ε2/ε4", "ε3/ε4", "ε4/ε4"):
+        labels = {
+            "ε2/ε4": ("中等", "#fffbeb", "#d97706", "#92400e"),
+            "ε3/ε4": ("中度升高", "#fffbeb", "#d97706", "#92400e"),
+            "ε4/ε4": ("高風險", "#fef2f2", "#dc2626", "#991b1b"),
+        }
+        label, bg, border, fg = labels[rk]
+        disp = rk.replace("/", " / ")
+        return (
+            f'<div style="margin:0 0 12px;padding:10px 12px;border-radius:8px;border:2px solid {border};'
+            f'background:{bg};font-size:9pt;line-height:1.45;color:{fg}">'
+            f"<strong>臨床提示 — APOE</strong><br />"
+            f"二倍體型 <strong>{html.escape(disp)}</strong>：阿茲海默病風險 — "
+            f"<strong>{html.escape(label)}</strong>。請結合完整臨床背景解讀。</div>"
+        )
+    if rk in ("ambiguous_both_het", "unknown"):
+        return (
+            '<div style="margin:0 0 12px;padding:10px 12px;border-radius:8px;border:2px solid #dc2626;'
+            'background:#fef2f2;font-size:9pt;line-height:1.45;color:#991b1b">'
+            "<strong>相位解析提示 — APOE</strong><br />"
+            "依現有 tag-SNP 資料無法確定 ε2/ε3/ε4 單倍型相位。在依實驗室政策完成相位解析"
+            "（例如正交分型或 read-backed phasing）前，請勿於預防性健康諮詢中報告明確二倍體型。</div>"
+        )
+    return ""
+
+
+APOE_PROACTIVE_DISCLAIMER_HTML_CN = (
+    '<p style="margin-top:12px;padding-top:10px;border-top:1px solid #cbd5e1;font-size:7.5pt;line-height:1.4;color:#475569">'
+    "<strong>免責聲明：</strong>風險估計為近似值，基於人群研究。實際風險因年齡、性別、族裔、"
+    "環境因素及家族史而異。APOE 基因型並非診斷依據，不應單獨用於預測疾病。"
+    "</p>"
+)
+
+APOE_PROACTIVE_DIPLOTYPE_BODIES_CN: Dict[str, str] = {
+    "ε2/ε2": (
+        "<p style=\"margin:0 0 6px;font-size:11pt;font-weight:700\">ε2 / ε2</p>"
+        '<p style="margin:0 0 4px"><strong>阿茲海默病風險：</strong><br />約 0.5×（風險降低）</p>'
+        '<p style="margin:0"><strong>臨床摘要：</strong><br />'
+        "與阿茲海默病風險降低相關。部分個體可能與 III 型高脂蛋白血症相關。</p>"
+    ),
+    "ε2/ε3": (
+        "<p style=\"margin:0 0 6px;font-size:11pt;font-weight:700\">ε2 / ε3</p>"
+        '<p style="margin:0 0 4px"><strong>阿茲海默病風險：</strong><br />約 0.6–0.8×（略為降低）</p>'
+        '<p style="margin:0"><strong>臨床摘要：</strong><br />'
+        "一般視為具保護性或中性。可能觀察到輕度脂質代謝影響。</p>"
+    ),
+    "ε3/ε3": (
+        "<p style=\"margin:0 0 6px;font-size:11pt;font-weight:700\">ε3 / ε3</p>"
+        '<p style="margin:0 0 4px"><strong>阿茲海默病風險：</strong><br />約 1×（基準）</p>'
+        '<p style="margin:0"><strong>臨床摘要：</strong><br />'
+        "為參考基因型，具人群平均風險。</p>"
+    ),
+    "ε2/ε4": (
+        "<p style=\"margin:0 0 6px;font-size:11pt;font-weight:700\">ε2 / ε4</p>"
+        '<p style="margin:0 0 4px"><strong>阿茲海默病風險：</strong><br />'
+        "<strong>中等</strong>（相對 ε3/ε3 基準，文獻常引用約 2–3×；人群估計值各異）</p>"
+        '<p style="margin:0"><strong>臨床摘要：</strong><br />'
+        "混合基因型，風險具變異性。ε4 升高風險，ε2 可能部分抵消。</p>"
+    ),
+    "ambiguous_both_het": (
+        '<p style="margin:0 0 8px;font-size:10.5pt;font-weight:700">APOE 單倍型 — 相位不明</p>'
+        '<p style="margin:0 0 8px;font-size:8.5pt;line-height:1.45">'
+        "<strong>因相位不明，無法明確判定 APOE 單倍型。</strong></p>"
+        '<p style="margin:0 0 6px;font-size:8.5pt;line-height:1.45">'
+        "tag SNP（rs429358、rs7412）所見變異與以下<strong>任一</strong>情況一致：</p>"
+        '<ul style="margin:0 0 10px;padding-left:18px;font-size:8.5pt;line-height:1.45">'
+        "<li>ε2/ε4 基因型，<em>或</em></li>"
+        "<li>ε3/ε3 基因型。</li>"
+        "</ul>"
+        '<p style="margin:0;font-size:8.5pt;line-height:1.45;color:#334155">'
+        "若臨床上有需要，可考慮進一步檢測（例如標靶基因分型或長讀序）以解析單倍型相位。</p>"
+    ),
+    "ε3/ε4": (
+        "<p style=\"margin:0 0 6px;font-size:11pt;font-weight:700\">ε3 / ε4</p>"
+        '<p style="margin:0 0 4px"><strong>阿茲海默病風險：</strong><br />'
+        "<strong>中度升高</strong>（相對 ε3/ε3，文獻常引用約 2–4×；人群估計值各異）</p>"
+        '<p style="margin:0"><strong>臨床摘要：</strong><br />'
+        "與阿茲海默病風險中度升高相關。亦可能與較高 LDL 膽固醇相關。</p>"
+    ),
+    "ε4/ε4": (
+        "<p style=\"margin:0 0 6px;font-size:11pt;font-weight:700\">ε4 / ε4</p>"
+        '<p style="margin:0 0 4px"><strong>阿茲海默病風險：</strong><br />'
+        "<strong>高風險</strong>（相對 ε3/ε3，文獻常引用約 8–12×；人群估計值各異）</p>"
+        '<p style="margin:0"><strong>臨床摘要：</strong><br />'
+        "與顯著升高的風險及較早發病相關。亦與心血管風險升高有關。</p>"
+    ),
+    "unknown": (
+        '<p style="margin:0 0 6px;font-size:10pt"><strong>APOE ε2/ε3/ε4 摘要</strong></p>'
+        '<p style="margin:0;font-size:8.5pt">無法由本報告中的 tag-SNP 基因型判定二倍體型。'
+        "請參閱原始 PGx 輸出及實驗室 SOP。</p>"
+    ),
+}
+
+
+def _apoe_proactive_locale_pack(lang: str) -> Tuple[Dict[str, str], str]:
+    lang_u = (lang or "EN").strip().upper()
+    if lang_u == "CN":
+        return APOE_PROACTIVE_DIPLOTYPE_BODIES_CN, APOE_PROACTIVE_DISCLAIMER_HTML_CN
+    return APOE_PROACTIVE_DIPLOTYPE_BODIES, APOE_PROACTIVE_DISCLAIMER_HTML
+
+
+def build_apoe_proactive_pdf_html(report_key: str, lang: str = "EN") -> str:
     """WeasyPrint-safe HTML fragment (optional alert + one diplotype block + disclaimer)."""
     rk = (report_key or "").strip() or "unknown"
-    alert = _apoe_proactive_pdf_alert_html(rk)
-    body = APOE_PROACTIVE_DIPLOTYPE_BODIES.get(rk) or APOE_PROACTIVE_DIPLOTYPE_BODIES["unknown"]
+    lang_u = (lang or "EN").strip().upper()
+    alert = _apoe_proactive_pdf_alert_html(rk, lang_u)
+    bodies, disclaimer = _apoe_proactive_locale_pack(lang_u)
+    body = bodies.get(rk) or bodies.get("unknown") or APOE_PROACTIVE_DIPLOTYPE_BODIES["unknown"]
     return (
         '<div class="apoe-proactive-pdf" style="font-size:8.5pt;line-height:1.45;color:#0f172a">'
-        f"{alert}{body}{APOE_PROACTIVE_DISCLAIMER_HTML}</div>"
+        f"{alert}{body}{disclaimer}</div>"
+    )
+
+
+def localize_pgx_for_language(
+    report_data: Dict[str, Any],
+    lang: str,
+    *,
+    db_path: Optional[str] = None,
+    gemini_api_key: str = "",
+    model: str = "gemini-2.5-flash",
+    allow_gemini: bool = True,
+) -> Dict[str, Any]:
+    """
+    Apply CN/KO strings to PGx blocks in report JSON.
+
+    Drug names stay in English; clinical narrative (phenotypes, implications,
+    recommendations, allele functions, clinical significance) is translated
+    via Gemini with SQLite cache (``pgx_text_locale`` in gene_knowledge DB).
+    """
+    import copy
+
+    lang_u = (lang or "EN").strip().upper()
+    if lang_u == "EN":
+        return report_data
+    data = copy.deepcopy(report_data)
+    pgx = data.get("pgx")
+    if not isinstance(pgx, dict):
+        return data
+
+    mem: Dict[str, str] = {}
+    gk_db = (db_path or "").strip()
+    api_key = (gemini_api_key or "").strip()
+    use_gemini = bool(allow_gemini and api_key)
+
+    def _loc(text: str) -> str:
+        return _localize_pgx_clinical_text(
+            text,
+            lang_u,
+            gk_db,
+            api_key,
+            model,
+            use_gemini,
+            mem,
+        )
+
+    gene_results = pgx.get("gene_results")
+    if isinstance(gene_results, list):
+        for row in gene_results:
+            if not isinstance(row, dict):
+                continue
+            for field in ("phenotype", "allele1_function", "allele2_function"):
+                if (row.get(field) or "").strip():
+                    row[field] = _loc(str(row[field]))
+
+    drug_recs = pgx.get("drug_recommendations")
+    if isinstance(drug_recs, list):
+        for rec in drug_recs:
+            if not isinstance(rec, dict):
+                continue
+            for field in ("implication", "recommendation", "phenotype"):
+                if (rec.get(field) or "").strip():
+                    rec[field] = _loc(str(rec[field]))
+
+    custom = pgx.get("custom_gene_results")
+    if isinstance(custom, list):
+        for row in custom:
+            if not isinstance(row, dict):
+                continue
+            if (row.get("clinical_significance") or "").strip():
+                row["clinical_significance"] = _loc(str(row["clinical_significance"]))
+
+    apoe_ph = pgx.get("apoe_phasing")
+    if isinstance(apoe_ph, dict):
+        for field in ("short_warning", "detail", "message"):
+            if (apoe_ph.get(field) or "").strip():
+                apoe_ph[field] = _loc(str(apoe_ph[field]))
+
+    if (pgx.get("summary_text") or "").strip():
+        pgx["summary_text"] = _loc(str(pgx["summary_text"]))
+        if (pgx.get("summary_for_pdf_html") or "").strip():
+            pgx["summary_for_pdf_html"] = _rebuild_pgx_summary_for_pdf_html(pgx, lang_u)
+
+    adp = pgx.get("apoe_diplotype_for_report")
+    md = data.get("report_metadata") if isinstance(data.get("report_metadata"), dict) else {}
+    apoe_excluded = md.get("include_apoe_on_proactive_pdf") is False
+    if apoe_excluded:
+        pgx["apoe_proactive_summary_html"] = ""
+    elif (pgx.get("apoe_proactive_summary_html") or "").strip():
+        rk = "unknown"
+        if isinstance(adp, dict) and (adp.get("report_key") or "").strip():
+            rk = str(adp["report_key"]).strip()
+        pgx["apoe_proactive_summary_html"] = build_apoe_proactive_pdf_html(rk, lang_u)
+
+    data["pgx"] = pgx
+    return data
+
+
+_PGX_GLOSSARY_CN: Dict[str, str] = {
+    "no function": "無功能",
+    "decreased function": "功能降低",
+    "normal function": "正常功能",
+    "increased function": "功能增加",
+    "uncertain function": "功能不確定",
+    "unfavorable response allele": "不利反應等位基因",
+    "poor metabolizer": "弱代謝型",
+    "intermediate metabolizer": "中間代謝型",
+    "normal metabolizer": "正常代謝型",
+    "rapid metabolizer": "快代謝型",
+    "ultrarapid metabolizer": "超快代謝型",
+    "likely poor metabolizer": "可能弱代謝型",
+    "likely intermediate metabolizer": "可能中間代謝型",
+    "indeterminate": "未能確定",
+    "actionable": "需關注",
+    "normal": "正常",
+}
+
+
+def _pgx_glossary_cn(text: str) -> Optional[str]:
+    t = (text or "").strip()
+    if not t:
+        return t
+    low = t.lower()
+    if low in _PGX_GLOSSARY_CN:
+        return _PGX_GLOSSARY_CN[low]
+    if "," in t:
+        parts = [p.strip() for p in t.split(",")]
+        out: List[str] = []
+        changed = False
+        for part in parts:
+            mapped = _PGX_GLOSSARY_CN.get(part.lower())
+            if mapped:
+                out.append(mapped)
+                changed = True
+            else:
+                out.append(part)
+        if changed:
+            return ", ".join(out)
+    if " / " in t:
+        parts = [p.strip() for p in t.split(" / ")]
+        out = []
+        changed = False
+        for part in parts:
+            mapped = _PGX_GLOSSARY_CN.get(part.lower())
+            if mapped:
+                out.append(mapped)
+                changed = True
+            else:
+                out.append(part)
+        if changed:
+            return " / ".join(out)
+    return None
+
+
+def _localize_pgx_clinical_text(
+    text: str,
+    lang: str,
+    db_path: Optional[str],
+    api_key: str,
+    model: str,
+    allow_gemini: bool,
+    mem_cache: Dict[str, str],
+) -> str:
+    src = (text or "").strip()
+    if not src or lang == "EN":
+        return src
+    cache_hit = mem_cache.get(f"{lang}|{src}")
+    if cache_hit is not None:
+        return cache_hit
+    if lang == "CN":
+        gloss = _pgx_glossary_cn(src)
+        if gloss:
+            mem_cache[f"{lang}|{src}"] = gloss
+            return gloss
+    if db_path:
+        from .gene_knowledge_db import ensure_pgx_narrative_locale
+
+        out = ensure_pgx_narrative_locale(
+            src,
+            lang,
+            db_path,
+            api_key,
+            model=model,
+            allow_gemini=allow_gemini,
+        )
+        mem_cache[f"{lang}|{src}"] = out
+        return out
+    if allow_gemini and api_key:
+        from .gene_knowledge_db import translate_pgx_narrative_via_gemini
+
+        out = translate_pgx_narrative_via_gemini(src, lang, api_key, model=model)
+        mem_cache[f"{lang}|{src}"] = out
+        return out
+    mem_cache[f"{lang}|{src}"] = src
+    return src
+
+
+def _rebuild_pgx_summary_for_pdf_html(pgx: Dict[str, Any], lang: str) -> str:
+    """Rebuild PharmCAT summary pre block after ``summary_text`` localization."""
+    lang_u = (lang or "EN").strip().upper()
+    meta = pgx.get("meta") if isinstance(pgx.get("meta"), dict) else {}
+    tool_v = (meta.get("tool_version") or meta.get("tool") or "PharmCAT").strip()
+    body = pgx.get("summary_text") or ""
+    esc = html.escape(body)
+
+    apoe_html = ""
+    apoe_ph = pgx.get("apoe_phasing")
+    if isinstance(apoe_ph, dict) and apoe_ph.get("show_alert"):
+        sw = html.escape(str(apoe_ph.get("short_warning") or "").strip())
+        det = html.escape(str(apoe_ph.get("detail") or "").strip())
+        if sw or det:
+            title = "APOE 相位" if lang_u == "CN" else "APOE phasing"
+            br_sw = f"<br />{sw}" if sw else ""
+            br_det = (
+                f'<br /><span style="font-size:8pt;opacity:.95">{det}</span>' if det else ""
+            )
+            apoe_html = (
+                f'<div class="pgx-apoe-phase" style="margin:0 0 12px;padding:10px 12px;border-radius:8px;'
+                f"border:1px solid #f59e0b;background:#fffbeb;font-size:8.5pt;line-height:1.45;color:#92400e\">"
+                f"<strong>{title}</strong>"
+                f"{br_sw}{br_det}</div>"
+            )
+
+    if lang_u == "CN":
+        foot = (
+            f'<p class="muted" style="font-size:7.5pt;margin-top:10px;line-height:1.4;">'
+            f"來源：PharmCAT 摘要文字。完整互動式報告見 "
+            f"<code>pgx/</code> 輸出（<code>*_pgx.report.html</code>）。{html.escape(tool_v)}"
+            f"</p>"
+        )
+    else:
+        foot = (
+            f'<p class="muted" style="font-size:7.5pt;margin-top:10px;line-height:1.4;">'
+            f"Source: PharmCAT summary text. Full interactive report: "
+            f"<code>pgx/</code> output (<code>*_pgx.report.html</code>). {html.escape(tool_v)}"
+            f"</p>"
+        )
+    return (
+        f"{apoe_html}"
+        f'<pre class="pgx-summary" style="white-space:pre-wrap;font-family:ui-monospace,monospace;'
+        f"font-size:8.5pt;line-height:1.35;border:1px solid #cbd5e1;border-radius:8px;"
+        f'padding:12px;background:#f8fafc;">{esc}</pre>{foot}'
     )
 
 
@@ -1196,7 +1549,25 @@ def _first_basename(dir_path: str, pattern: str) -> Optional[str]:
     return os.path.basename(paths[0])
 
 
-def pgx_for_pdf(pgx: Dict[str, Any]) -> Dict[str, Any]:
+def pgx_inclusions_locked(pgx: Dict[str, Any]) -> bool:
+    """
+    True when the reviewer saved PGx ✓ Include choices via the portal.
+
+    When locked, PDF shows only ``reviewer_confirmed`` rows — no fallback to the full
+    PharmCAT / extended panel (e.g. proactive with only APOE checked).
+    """
+    pr = pgx.get("portal_review")
+    if not isinstance(pr, dict):
+        return False
+    return bool(pr.get("inclusions_saved"))
+
+
+def pgx_for_pdf(
+    pgx: Dict[str, Any],
+    *,
+    default_include_apoe_proactive: bool = False,
+    apoe_lang: str = "EN",
+) -> Dict[str, Any]:
     """
     Subset + HTML fragment for WeasyPrint (written into report.json used by Jinja).
     """
@@ -1278,8 +1649,8 @@ def pgx_for_pdf(pgx: Dict[str, Any]) -> Dict[str, Any]:
     elif ex_apoe is True or str(ex_apoe).strip().lower() in ("true", "1", "yes"):
         include_apoe_pdf = True
     else:
-        # Reviewer never saved PGx review: still emit APOE PDF when extended panel has tag SNPs
-        include_apoe_pdf = _apoe_tag_rows_present()
+        # Proactive PDFs default APOE on; otherwise include when tag SNPs are present.
+        include_apoe_pdf = bool(default_include_apoe_proactive) or _apoe_tag_rows_present()
 
     adp = pgx.get("apoe_diplotype_for_report")
     if include_apoe_pdf and not isinstance(adp, dict):
@@ -1290,7 +1661,7 @@ def pgx_for_pdf(pgx: Dict[str, Any]) -> Dict[str, Any]:
             )
     if include_apoe_pdf and isinstance(adp, dict):
         rk = str(adp.get("report_key") or "unknown").strip()
-        out["apoe_proactive_summary_html"] = build_apoe_proactive_pdf_html(rk)
+        out["apoe_proactive_summary_html"] = build_apoe_proactive_pdf_html(rk, apoe_lang)
     else:
         out["apoe_proactive_summary_html"] = ""
 
@@ -1315,16 +1686,26 @@ def pgx_for_pdf(pgx: Dict[str, Any]) -> Dict[str, Any]:
     _EXCLUDE_FROM_GENE_LIST = {"MT-RNR1", "CFTR", "HLA-A", "HLA-B", "CES1", "IFNL3"}
     out["genes_evaluated"] = sorted(all_gene_names - _EXCLUDE_FROM_GENE_LIST)
 
+    locked = pgx_inclusions_locked(pgx)
     confirmed = [r for r in all_genes if isinstance(r, dict) and r.get("reviewer_confirmed")]
-    out["gene_results"] = confirmed if confirmed else all_genes
+    if locked:
+        out["gene_results"] = confirmed
+    else:
+        # Never saved PGx review: show all PharmCAT rows when none checked so the section is not empty.
+        out["gene_results"] = confirmed if confirmed else all_genes
 
     drug_recs = pgx.get("drug_recommendations")
+    confirmed_gene_names = {r["gene"] for r in out["gene_results"] if r.get("gene")}
     if isinstance(drug_recs, list) and drug_recs:
-        confirmed_gene_names = {r["gene"] for r in out["gene_results"] if r.get("gene")}
-        out["drug_recommendations"] = [
-            r for r in drug_recs
-            if not confirmed_gene_names or r.get("gene") in confirmed_gene_names
-        ]
+        if locked:
+            out["drug_recommendations"] = [
+                r for r in drug_recs if r.get("gene") in confirmed_gene_names
+            ]
+        else:
+            out["drug_recommendations"] = [
+                r for r in drug_recs
+                if not confirmed_gene_names or r.get("gene") in confirmed_gene_names
+            ]
     else:
         out["drug_recommendations"] = generate_cpic_drug_recommendations(out["gene_results"])
 
@@ -1332,9 +1713,10 @@ def pgx_for_pdf(pgx: Dict[str, Any]) -> Dict[str, Any]:
         pharmcat_genes = {r["gene"] for r in out["gene_results"] if r.get("gene")}
         non_pharmcat = [r for r in custom if r.get("gene") not in pharmcat_genes]
         confirmed_custom = [r for r in non_pharmcat if r.get("reviewer_confirmed")]
-        # Match PharmCAT row logic: if reviewer checked at least one ✓ Include, PDF shows only those;
-        # if none checked, show all extended-panel rows so the PGx report is not empty.
-        out["custom_gene_results"] = confirmed_custom if confirmed_custom else non_pharmcat
+        if locked:
+            out["custom_gene_results"] = confirmed_custom
+        else:
+            out["custom_gene_results"] = confirmed_custom if confirmed_custom else non_pharmcat
     else:
         out["custom_gene_results"] = []
 
@@ -1348,7 +1730,12 @@ def sanitize_pgx_payload_for_pdf_render(report_data: Dict[str, Any]) -> None:
         return
     if (pgx.get("summary_for_pdf_html") or "").strip():
         return
-    merged = pgx_for_pdf(pgx)
+    meta = report_data.get("report_metadata") if isinstance(report_data.get("report_metadata"), dict) else {}
+    merged = pgx_for_pdf(
+        pgx,
+        default_include_apoe_proactive=bool(meta.get("include_apoe_on_proactive_pdf")),
+        apoe_lang=str(meta.get("language") or "EN"),
+    )
     if merged:
         combined = {**pgx, **merged}
         combined.pop("portal_review", None)

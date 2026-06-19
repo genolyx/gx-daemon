@@ -12,7 +12,7 @@ import html
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -168,26 +168,76 @@ def _infer_pipeline_section_high_risk(sec: Dict[str, Any]) -> bool:
     return False
 
 
+def _section_review_has_explicit_tier(rev: Optional[Dict[str, Any]]) -> bool:
+    if not rev or not isinstance(rev, dict):
+        return False
+    r = rev.get("risk")
+    return r is not None and str(r).strip() != ""
+
+
+def _section_review_is_reviewer_locked(rev: Optional[Dict[str, Any]]) -> bool:
+    """True after portal **Save section reviews** — risk/approve must not be re-inferred."""
+    return bool(rev and isinstance(rev, dict) and rev.get("reviewer_set"))
+
+
 def effective_risk_for_section(
     rev: Dict[str, Any],
     sec: Optional[Dict[str, Any]],
 ) -> str:
     """
-    ``section_reviews[i].risk`` when set, except a stored **low** is ignored if the pipeline
-    section text still signals high priority (CAH uncertain deletion, ``WARNING:``, etc.) so
-    stale JSON / reprocessed reports do not stay green after the body updates.
+    Risk tier for PDF title color and approval rules.
+
+    - **Reviewer locked** (``reviewer_set``): use saved tier; pipeline inference never overrides.
+    - **Stored tier, not locked**: use saved tier unless pipeline now signals high and the row
+      still looks like a stale auto-default (no lock) — then upgrade to high.
+    - **No stored tier**: infer from pipeline text.
     """
     inferred = bool(sec and _infer_pipeline_section_high_risk(sec))
     if rev:
-        r = rev.get("risk")
-        if r is not None and str(r).strip() != "":
-            stored = _coerce_risk_level(r)
+        if _section_review_is_reviewer_locked(rev):
+            r = rev.get("risk")
+            if r is not None and str(r).strip() != "":
+                return _coerce_risk_level(r)
+        if _section_review_has_explicit_tier(rev):
+            stored = _coerce_risk_level(rev.get("risk"))
             if stored == "low" and inferred:
                 return "high"
             return stored
     if sec is not None:
         return "high" if inferred else "low"
     return "low"
+
+
+def apply_reviewer_section_reviews(
+    incoming: List[Any],
+    n: int,
+    sections: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Persist portal **Save section reviews** without upgrading reviewer **low** back to pipeline
+    **high** or clearing approval. Sets ``reviewer_set`` so PDF + reload honor the choice.
+    """
+    out: List[Dict[str, Any]] = []
+    for i in range(n):
+        sec_i = sections[i] if sections and i < len(sections) else None
+        inc: Dict[str, Any] = {}
+        if i < len(incoming) and isinstance(incoming[i], dict):
+            inc = incoming[i]
+        pr = inc.get("risk")
+        if pr is not None and str(pr).strip() != "":
+            risk = _coerce_risk_level(pr)
+        else:
+            risk = "high" if sec_i and _infer_pipeline_section_high_risk(sec_i) else "low"
+        approved = _coerce_approved_bool(inc.get("approved"))
+        out.append(
+            {
+                "approved": approved,
+                "notes": str(inc.get("notes") or "")[:8000],
+                "risk": risk,
+                "reviewer_set": True,
+            }
+        )
+    return out
 
 
 def _disk_review_risk_is_explicit_high(rev: Dict[str, Any]) -> bool:
@@ -214,11 +264,17 @@ def effective_approved_for_dark_genes_section(
     **never** eligible for the customer PDF, even if ``approved`` is true.
 
     **High** effective risk still requires portal ``approved`` plus an explicit stored **high**
-    tier when the pipeline infers high priority (see ``_disk_review_risk_is_explicit_high``).
+    tier when the pipeline infers high priority (see ``_disk_review_risk_is_explicit_high``),
+    unless the row is **reviewer locked** (saved tier + approve are authoritative).
+
+    Reviewer **unapprove** at low tier on core loci is never overridden by auto-approve.
     """
     if _cftr_section_molecular_risk_level(sec) == "low":
         return False
-    if effective_risk_for_section(rev, sec) == "low":
+    eff_risk = effective_risk_for_section(rev, sec)
+    if eff_risk == "low":
+        if _section_review_is_reviewer_locked(rev):
+            return _coerce_approved_bool(rev.get("approved"))
         if (
             sec is not None
             and dark_genes_section_always_on_customer_pdf(sec)
@@ -228,6 +284,8 @@ def effective_approved_for_dark_genes_section(
         return _coerce_approved_bool(rev.get("approved"))
     if not _coerce_approved_bool(rev.get("approved")):
         return False
+    if _section_review_is_reviewer_locked(rev):
+        return _coerce_risk_level(rev.get("risk")) == "high"
     if sec is not None and _infer_pipeline_section_high_risk(sec):
         return _disk_review_risk_is_explicit_high(rev)
     return True
@@ -251,7 +309,140 @@ _DARK_GENES_DISPLAY_TITLE: Dict[str, str] = {
 }
 
 
-def dark_genes_display_title(raw: Optional[str]) -> str:
+_DARK_GENES_DISPLAY_TITLE_CN: Dict[str, str] = {
+    "Spinal Muscular Atrophy": "脊髓性肌萎縮",
+    "Alpha Thalassemia": "α地中海貧血",
+    "Congenital Adrenal Hyperplasia (CAH)": "先天性腎上腺皮質增生症 (CAH)",
+    "Fragile X": "脆性X綜合症",
+    "Duchenne Muscular Dystrophy (DMD)": "杜氏肌營養不良症 (DMD)",
+    "Large Structural Variants and Copy Number Variants": "大型結構變異與拷貝數變異",
+    "Supplementary detail": "補充分析詳情",
+}
+
+_DARK_GENES_DISPLAY_TITLE_KO: Dict[str, str] = {
+    "Spinal Muscular Atrophy": "척수근위축증",
+    "Alpha Thalassemia": "알파 지중해빈혈",
+    "Congenital Adrenal Hyperplasia (CAH)": "선천성 부신피질 증식증 (CAH)",
+    "Fragile X": "취약 X 증후군",
+    "Duchenne Muscular Dystrophy (DMD)": "듀센근이영양증 (DMD)",
+    "Large Structural Variants and Copy Number Variants": "대형 구조 변이 및 카피수 변이",
+    "Supplementary detail": "보충 분석 상세",
+}
+
+_DARK_GENES_KV_LABEL_CN: Dict[str, str] = {
+    "SMN1 CNV (est.)": "SMN1 估計拷貝數",
+    "SMN1 CNV": "SMN1 拷貝數",
+    "SMN2 CNV (est.)": "SMN2 估計拷貝數",
+    "SMN2 CNV": "SMN2 拷貝數",
+    "Silent Carrier": "靜在帶因者",
+    "SMN1 cov fraction": "SMN1 覆蓋率比值",
+    "SNP C,T counts": "SNP C/T 計數",
+    "SNP C/T ratio": "SNP C/T 比值",
+    "Cov(1,2)": "覆蓋度 (1,2)",
+    "CYP21A2 interval mean depth": "CYP21A2 區間平均深度",
+    "Chr6 median target depth": "6號染色體中位目標深度",
+    "Depth ratio (CYP21/Chr6)": "深度比值 (CYP21/Chr6)",
+    "Estimated CNV": "估計拷貝數",
+    "Ratio": "比值",
+    "Warning": "警告",
+    "Hotspot mutations (7)": "熱點突變 (7)",
+    "Paralog deletion": "假基因缺失",
+    "Poly-T": "Poly-T",
+    "TG": "TG",
+    "Notes": "備註",
+    "Interpretation": "解讀",
+}
+
+_DARK_GENES_KV_LABEL_KO: Dict[str, str] = {
+    "SMN1 CNV (est.)": "SMN1 추정 카피수",
+    "SMN1 CNV": "SMN1 카피수",
+    "SMN2 CNV (est.)": "SMN2 추정 카피수",
+    "SMN2 CNV": "SMN2 카피수",
+    "Silent Carrier": "잠재 보인자",
+    "SMN1 cov fraction": "SMN1 커버리지 비율",
+    "SNP C,T counts": "SNP C/T 카운트",
+    "SNP C/T ratio": "SNP C/T 비율",
+    "Cov(1,2)": "커버리지 (1,2)",
+    "CYP21A2 interval mean depth": "CYP21A2 구간 평균 깊이",
+    "Chr6 median target depth": "염색체 6 중앙값 목표 깊이",
+    "Depth ratio (CYP21/Chr6)": "깊이 비율 (CYP21/Chr6)",
+    "Estimated CNV": "추정 카피수",
+    "Ratio": "비율",
+    "Warning": "경고",
+    "Hotspot mutations (7)": "핫스팟 돌연 (7)",
+    "Paralog deletion": "유사유전자 결손",
+    "Poly-T": "Poly-T",
+    "TG": "TG",
+    "Notes": "메모",
+    "Interpretation": "해석",
+}
+
+_DARK_GENES_DISORDER_CN: Dict[str, str] = {
+    "Spinal muscular atrophy": "脊髓性肌萎縮",
+    "Fragile X syndrome": "脆性X綜合症",
+    "Alpha-thalassemia": "α地中海貧血",
+    "Congenital adrenal hyperplasia": "先天性腎上腺皮質增生症",
+    "Duchenne muscular dystrophy": "杜氏肌營養不良症",
+    "Cystic fibrosis": "囊性纖維化",
+}
+
+_DARK_GENES_DISORDER_KO: Dict[str, str] = {
+    "Spinal muscular atrophy": "척수근위축증",
+    "Fragile X syndrome": "취약 X 증후군",
+    "Alpha-thalassemia": "알파 지중해� 빈혈",
+    "Congenital adrenal hyperplasia": "선천성 부신피질 증식증",
+    "Duchenne muscular dystrophy": "듀센근이영양증",
+    "Cystic fibrosis": "낭포성 섬유증",
+}
+
+_DARK_GENES_INHERITANCE_CN: Dict[str, str] = {
+    "Autosomal recessive": "常染色體隱性遺傳",
+    "X-linked": "X連鎖遺傳",
+}
+
+_DARK_GENES_INHERITANCE_KO: Dict[str, str] = {
+    "Autosomal recessive": "상염색체 열성 유전",
+    "X-linked": "X연관 열성 유전",
+}
+
+_DARK_GENES_SUPPLEMENTAL_TEMPLATE_CN: Dict[str, str] = {
+    "Supplementary hard-to-sequence region analysis: reviewer marked this block as high "
+    "priority. See the Supplementary analysis section for technical detail.": (
+        "補充難以定序區域分析：審核者將此區塊標記為高優先級。"
+        "技術詳情請見「補充分析」章節。"
+    ),
+    "Supplementary finding — see Supplementary analysis section": "補充發現 — 詳見「補充分析」章節",
+    "High priority (supplementary review)": "高優先級（補充審核）",
+    "This result comes from the supplementary analysis block “{title}” "
+    "({gene}) included with this carrier screen.": (
+        "此結果來自本帶因篩查所包含的補充分析區塊「{title}」（{gene}）。"
+    ),
+    "Supplementary dark-gene analysis metadata could not be loaded: {msg}": (
+        "無法載入補充 dark-gene 分析元數據：{msg}"
+    ),
+}
+
+
+def _dark_genes_lang_maps(lang: str) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str], Dict[str, str]]:
+    lang_u = (lang or "EN").upper()
+    if lang_u == "CN":
+        return (
+            _DARK_GENES_DISPLAY_TITLE_CN,
+            _DARK_GENES_KV_LABEL_CN,
+            _DARK_GENES_DISORDER_CN,
+            _DARK_GENES_INHERITANCE_CN,
+        )
+    if lang_u == "KO":
+        return (
+            _DARK_GENES_DISPLAY_TITLE_KO,
+            _DARK_GENES_KV_LABEL_KO,
+            _DARK_GENES_DISORDER_KO,
+            _DARK_GENES_INHERITANCE_KO,
+        )
+    return ({}, {}, {}, {})
+
+
+def dark_genes_display_title(raw: Optional[str], lang: str = "EN") -> str:
     """
     Map pipeline dark-gene section titles to report-facing names (PDF + portal).
     Unknown titles pass through unchanged.
@@ -260,9 +451,298 @@ def dark_genes_display_title(raw: Optional[str]) -> str:
     if not t:
         return "Section"
     if re.match(r"^smaca\s+check\b", t, re.I):
-        return "Spinal Muscular Atrophy"
-    key = " ".join(t.lower().split())
-    return _DARK_GENES_DISPLAY_TITLE.get(key, t)
+        en = "Spinal Muscular Atrophy"
+    else:
+        key = " ".join(t.lower().split())
+        en = _DARK_GENES_DISPLAY_TITLE.get(key, t)
+    lang_u = (lang or "EN").upper()
+    if lang_u == "EN":
+        return en
+    disp_map, _, _, _ = _dark_genes_lang_maps(lang_u)
+    return disp_map.get(en, en)
+
+
+def _dark_genes_kv_label(label: str, lang: str) -> str:
+    lang_u = (lang or "EN").upper()
+    if lang_u == "EN":
+        return label
+    _, kv_map, _, _ = _dark_genes_lang_maps(lang_u)
+    return kv_map.get(label, label)
+
+
+def _dark_genes_ui_string(key: str, lang: str) -> str:
+    lang_u = (lang or "EN").upper()
+    if lang_u == "EN":
+        return key
+    _, kv_map, _, _ = _dark_genes_lang_maps(lang_u)
+    return kv_map.get(key, key)
+
+
+def _dark_genes_skip_narrative_translation(text: str) -> bool:
+    """
+    Skip Gemini for pipeline tokens, numbers, and short labels.
+
+    Dark-gene PDF bodies are mostly KEY=value rows; only warnings and reviewer notes need
+    narrative translation. Per-line body translation caused dozens of serial API calls.
+    """
+    t = (text or "").strip()
+    if not t or len(t) < 16:
+        return True
+    if re.match(r"^[\d\s.\-/\\+,=:%()]+$", t):
+        return True
+    if re.match(r"^[A-Za-z][A-Za-z0-9_.]*\s*=", t):
+        return True
+    if re.match(r"^[A-Za-z0-9_]+:\s*\S", t) and len(t) < 80:
+        return True
+    alpha = sum(1 for c in t if c.isalpha())
+    if alpha < 8:
+        return True
+    return False
+
+
+def _localize_dark_genes_text(
+    text: str,
+    lang: str,
+    db_path: str,
+    api_key: str,
+    model: str,
+    allow_gemini: bool,
+    mem_cache: Dict[str, str],
+) -> str:
+    src = (text or "").strip()
+    if not src or (lang or "EN").upper() == "EN":
+        return src
+    if _dark_genes_skip_narrative_translation(src):
+        return src
+    lang_u = lang.upper()
+    hit = mem_cache.get(f"{lang_u}|{src}")
+    if hit is not None:
+        return hit
+    if lang_u == "CN":
+        for template, translated in _DARK_GENES_SUPPLEMENTAL_TEMPLATE_CN.items():
+            if src == template:
+                mem_cache[f"{lang_u}|{src}"] = translated
+                return translated
+    if not allow_gemini or not (api_key or "").strip():
+        return src
+    if db_path:
+        from .gene_knowledge_db import ensure_dark_genes_narrative_locale
+
+        out = ensure_dark_genes_narrative_locale(
+            src,
+            lang_u,
+            db_path,
+            api_key,
+            model=model,
+            allow_gemini=True,
+        )
+    else:
+        from .gene_knowledge_db import translate_dark_genes_clinical_via_gemini
+
+        out = translate_dark_genes_clinical_via_gemini(src, lang_u, api_key, model=model)
+    mem_cache[f"{lang_u}|{src}"] = out
+    return out
+
+
+def _localize_dark_genes_body_prose(
+    body: str,
+    lang: str,
+    loc: Optional[Callable[[str], str]] = None,
+) -> str:
+    """Translate WARNING lines only; pipeline KEY=value rows stay as-is."""
+    if (lang or "EN").upper() == "EN" or not (body or "").strip() or not loc:
+        return body or ""
+    out_lines: List[str] = []
+    for ln in (body or "").splitlines():
+        stripped = ln.strip()
+        if not stripped:
+            out_lines.append(ln)
+            continue
+        if re.match(r"^WARNING:\s*", ln, re.I):
+            msg = re.sub(r"^WARNING:\s*", "", ln, flags=re.I).strip()
+            prefix = "WARNING: " if lang.upper() == "EN" else "警告: "
+            if msg:
+                msg = loc(msg)
+            out_lines.append(prefix + msg)
+            continue
+        out_lines.append(ln)
+    return "\n".join(out_lines)
+
+
+def _localize_dark_genes_supplemental_finding(
+    item: Dict[str, Any],
+    lang: str,
+    *,
+    loc: Optional[Callable[[str], str]] = None,
+) -> None:
+    if not isinstance(item, dict) or (lang or "EN").upper() == "EN":
+        return
+    lang_u = lang.upper()
+    _, _, disorder_map, inh_map = _dark_genes_lang_maps(lang_u)
+    disorder = (item.get("disorder") or "").strip()
+    if disorder and disorder in disorder_map:
+        item["disorder"] = disorder_map[disorder]
+    inh = (item.get("inheritance") or "").strip()
+    if inh and inh in inh_map:
+        item["inheritance"] = inh_map[inh]
+    for field in ("mutation", "classification", "gene_description", "variant_summary"):
+        val = (item.get(field) or "").strip()
+        if not val:
+            continue
+        if field == "gene_description":
+            disp = item.get("_disp_title") or ""
+            gene = item.get("gene") or "target locus"
+            template = (
+                "This result comes from the supplementary analysis block “{title}” "
+                "({gene}) included with this carrier screen."
+            )
+            if val.startswith("This result comes from") and lang_u == "CN":
+                item[field] = _DARK_GENES_SUPPLEMENTAL_TEMPLATE_CN[template].format(
+                    title=disp, gene=gene
+                )
+                continue
+        if field == "mutation" and val.startswith("Supplementary finding"):
+            static = _DARK_GENES_SUPPLEMENTAL_TEMPLATE_CN.get(val)
+            if lang_u == "CN" and static:
+                item[field] = static
+                continue
+        if field == "classification" and val.startswith("High priority"):
+            static = _DARK_GENES_SUPPLEMENTAL_TEMPLATE_CN.get(val)
+            if lang_u == "CN" and static:
+                item[field] = static
+                continue
+        if field == "variant_summary" and val.startswith("Supplementary hard-to-sequence"):
+            static = _DARK_GENES_SUPPLEMENTAL_TEMPLATE_CN.get(val)
+            if lang_u == "CN" and static:
+                item[field] = static
+                continue
+        if loc:
+            item[field] = loc(val)
+
+
+def localize_dark_genes_for_language(
+    report_data: Dict[str, Any],
+    lang: str,
+    *,
+    db_path: Optional[str] = None,
+    gemini_api_key: str = "",
+    model: str = "gemini-2.5-flash",
+    allow_gemini: bool = True,
+) -> Dict[str, Any]:
+    """
+    Apply CN/KO strings to ``dark_genes`` blocks in report JSON (supplementary analysis).
+
+    Rebuilds ``report_detailed_html`` from ``detailed_sections`` when present; otherwise
+    translates the existing HTML blob. Gene symbols and numeric pipeline values stay Latin.
+    """
+    import copy
+
+    lang_u = (lang or "EN").upper()
+    if lang_u == "EN":
+        return report_data
+    data = copy.deepcopy(report_data)
+    dg = data.get("dark_genes")
+    if not isinstance(dg, dict):
+        return data
+
+    mem: Dict[str, str] = {}
+    gemini_calls = 0
+    _DG_GEMINI_CAP = 12
+    gk_db = (db_path or "").strip()
+    api_key = (gemini_api_key or "").strip()
+    use_gemini = bool(allow_gemini and api_key)
+
+    def _loc(text: str) -> str:
+        nonlocal gemini_calls
+        src = (text or "").strip()
+        if not src or _dark_genes_skip_narrative_translation(src):
+            return src
+        cache_key = f"{lang_u}|{src}"
+        if cache_key in mem:
+            return mem[cache_key]
+        if gemini_calls >= _DG_GEMINI_CAP:
+            return src
+        gemini_calls += 1
+        return _localize_dark_genes_text(
+            text, lang_u, gk_db, api_key, model, use_gemini, mem
+        )
+
+    if dg.get("status") == "error" and (dg.get("report_summary") or "").strip():
+        summary = str(dg["report_summary"])
+        template = "Supplementary dark-gene analysis metadata could not be loaded: {msg}"
+        if lang_u == "CN" and summary.startswith("Supplementary dark-gene"):
+            msg = summary.split(":", 1)[-1].strip()
+            dg["report_summary"] = _DARK_GENES_SUPPLEMENTAL_TEMPLATE_CN[template].format(msg=msg)
+        else:
+            dg["report_summary"] = _loc(summary)
+
+    sections = dg.get("detailed_sections")
+    section_reviews = dg.get("section_reviews")
+    if isinstance(sections, list) and sections:
+        loc_sections: List[Dict[str, Any]] = []
+        for i, sec in enumerate(sections):
+            if not isinstance(sec, dict):
+                continue
+            s = dict(sec)
+            if (s.get("body") or "").strip():
+                s["body"] = _localize_dark_genes_body_prose(str(s["body"]), lang_u, _loc)
+            loc_sections.append(s)
+        loc_views: List[Dict[str, Any]] = []
+        if isinstance(section_reviews, list):
+            for rev in section_reviews:
+                r = dict(rev) if isinstance(rev, dict) else {}
+                if (r.get("notes") or "").strip():
+                    r["notes"] = _loc(str(r["notes"]))
+                loc_views.append(r)
+        dg["report_detailed_html"] = detailed_sections_to_pdf_html(
+            loc_sections,
+            loc_views if loc_views else section_reviews,
+            filter_by_approval=True,
+            lang=lang_u,
+            text_localizer=_loc,
+        )
+    elif (dg.get("report_detailed_html") or "").strip():
+        html_blob = str(dg["report_detailed_html"])
+        for en_title, cn_title in _DARK_GENES_DISPLAY_TITLE_CN.items() if lang_u == "CN" else []:
+            html_blob = html_blob.replace(html.escape(en_title), html.escape(cn_title))
+        if lang_u == "CN":
+            html_blob = html_blob.replace(
+                ">Interpretation</div>", f">{_dark_genes_ui_string('Interpretation', lang_u)}</div>"
+            )
+        dg["report_detailed_html"] = html_blob
+
+    sup = dg.get("supplemental_summary_findings")
+    if isinstance(sup, list):
+        for item in sup:
+            if isinstance(item, dict):
+                _localize_dark_genes_supplemental_finding(item, lang_u, loc=_loc)
+
+    for findings in _iter_report_finding_lists_for_dark_genes(data):
+        for item in findings:
+            if isinstance(item, dict) and item.get("finding_source") == "dark_genes_supplemental":
+                _localize_dark_genes_supplemental_finding(item, lang_u, loc=_loc)
+
+    data["dark_genes"] = dg
+    if gemini_calls >= _DG_GEMINI_CAP:
+        logger.warning(
+            "[localize_dark_genes] hit Gemini cap (%d) for %s — remaining narrative left in English",
+            _DG_GEMINI_CAP,
+            lang_u,
+        )
+    return data
+
+
+def _iter_report_finding_lists_for_dark_genes(report_data: Dict[str, Any]) -> List[List[Any]]:
+    out: List[List[Any]] = []
+    pp = report_data.get("primary_patient")
+    if isinstance(pp, dict) and isinstance(pp.get("findings"), list):
+        out.append(pp["findings"])
+    if isinstance(report_data.get("findings"), list):
+        out.append(report_data["findings"])
+    partner = report_data.get("partner")
+    if isinstance(partner, dict) and isinstance(partner.get("findings"), list):
+        out.append(partner["findings"])
+    return out
 
 
 # Core dark-gene display titles (SMA, Alpha Thalassemia, CAH, Fragile X, DMD). Used for
@@ -1131,12 +1611,11 @@ def align_section_reviews(
     ``risk`` defaults from the pipeline when missing: **low** unless the section has a
     ``WARNING:`` line, warning-kind title, or (CAH / CYP21A2) uncertain-deletion / paralog
     call language. A previously saved **low** is upgraded to **high** when inference says so
-    (reprocess / corrected body text); ``approved`` is cleared whenever inference is **high**
-    but the stored row never set **high** risk, so high-priority blocks are not implicitly
-    approved for report. **Low** final risk is auto-``approved`` **only** for the five core loci
-    (``dark_genes_section_always_on_customer_pdf``); other sections keep saved ``approved`` or
-    default to unapproved for new rows. **CFTR** IVS8/9 / EH adjunct blocks skip low-risk
-    auto-approve even if misclassified (always need explicit approval for benign/negative calls).
+    (reprocess / corrected body text) **only if the row is not reviewer locked**; ``approved``
+    is cleared when inference is **high** but the stored row never set **high** risk.
+    **Low** final risk auto-``approved`` **only** for the five core loci when the reviewer has
+    not explicitly unapproved. **CFTR** IVS8/9 / EH adjunct blocks skip low-risk auto-approve.
+    Rows with ``reviewer_set`` are never re-inferred or auto-approved over.
     """
     out: List[Dict[str, Any]] = []
     for i in range(n):
@@ -1144,8 +1623,24 @@ def align_section_reviews(
         inferred_high = bool(sec_i and _infer_pipeline_section_high_risk(sec_i))
         if prev and i < len(prev) and isinstance(prev[i], dict):
             p = prev[i]
+            if _section_review_is_reviewer_locked(p):
+                pr = p.get("risk")
+                if pr is not None and str(pr).strip() != "":
+                    risk = _coerce_risk_level(pr)
+                else:
+                    risk = "high" if inferred_high else "low"
+                out.append(
+                    {
+                        "approved": _coerce_approved_bool(p.get("approved")),
+                        "notes": str(p.get("notes") or "")[:8000],
+                        "risk": risk,
+                        "reviewer_set": True,
+                    }
+                )
+                continue
             pr = p.get("risk")
-            if pr is not None and str(pr).strip() != "":
+            has_tier = _section_review_has_explicit_tier(p)
+            if has_tier:
                 risk = _coerce_risk_level(pr)
             else:
                 risk = "high" if inferred_high else "low"
@@ -1153,12 +1648,9 @@ def align_section_reviews(
             if inferred_high and risk == "low":
                 risk = "high"
                 approved = False
-            stored_explicit_high = (
-                pr is not None
-                and str(pr).strip() != ""
-                and _coerce_risk_level(pr) == "high"
-            )
-            if inferred_high and not stored_explicit_high:
+            elif inferred_high and has_tier and _coerce_risk_level(pr) != "high":
+                approved = False
+            elif inferred_high and not has_tier:
                 approved = False
             if (
                 risk == "low"
@@ -1303,7 +1795,12 @@ _PDF_DG_KV_LABEL_PAD_RIGHT = "10px"
 _PDF_DG_KV_VALUE_START = _PDF_DG_KV_LABEL_WIDTH
 
 
-def _dl_kv_pdf_rows(rows: List[Tuple[str, str]]) -> str:
+def _dl_kv_pdf_rows(
+    rows: List[Tuple[str, str]],
+    *,
+    lang: str = "EN",
+    text_localizer: Optional[Callable[[str], str]] = None,
+) -> str:
     """Portal-style label/value rows for WeasyPrint (inline styles; no portal CSS)."""
     parts: List[str] = []
     lab_style = (
@@ -1317,10 +1814,14 @@ def _dl_kv_pdf_rows(rows: List[Tuple[str, str]]) -> str:
         "vertical-align:top;text-align:left;font-variant-numeric:tabular-nums;"
     )
     for lab, val in rows:
+        lab_out = _dark_genes_kv_label(lab, lang)
+        val_out = val
+        if lang != "EN" and lab == "Warning" and (val or "").strip() and text_localizer:
+            val_out = text_localizer(str(val))
         parts.append(
             "<tr>"
-            f'<td style="{lab_style}">{html.escape(lab)}</td>'
-            f'<td style="{val_style}">{html.escape(val)}</td>'
+            f'<td style="{lab_style}">{html.escape(lab_out)}</td>'
+            f'<td style="{val_style}">{html.escape(val_out)}</td>'
             "</tr>"
         )
     return (
@@ -1374,7 +1875,9 @@ def _smaca_extract_snp_ct_counts(raw: str) -> Optional[Tuple[str, str]]:
     return None
 
 
-def _try_smaca_kv_html(title: str, body: str) -> Optional[str]:
+def _try_smaca_kv_html(
+    title: str, body: str, *, lang: str = "EN", text_localizer: Optional[Callable[[str], str]] = None
+) -> Optional[str]:
     """Match portal ``tryRenderSmacaCheckSection`` (SMN1/SMN2/Silent Carrier/Ratio)."""
     if not re.search(r"SMAca\s*CHECK", title, re.I):
         return None
@@ -1411,7 +1914,7 @@ def _try_smaca_kv_html(title: str, body: str) -> Optional[str]:
         rows.append(("SNP C/T ratio", m_ct_ratio.group(1)))
     if m_cov:
         rows.append(("Cov(1,2)", re.sub(r"\s+", " ", m_cov.group(1).strip())))
-    return _dl_kv_pdf_rows(rows)
+    return _dl_kv_pdf_rows(rows, lang=lang, text_localizer=text_localizer)
 
 
 def _dosage_title_matches(title: str) -> bool:
@@ -1716,7 +2219,9 @@ def _cah_hotspot_call(raw: str) -> Optional[str]:
     return None
 
 
-def _try_cah_hotspot_standalone_kv_html(title: str, body: str) -> Optional[str]:
+def _try_cah_hotspot_standalone_kv_html(
+    title: str, body: str, *, lang: str = "EN", text_localizer: Optional[Callable[[str], str]] = None
+) -> Optional[str]:
     """
     When the section title is not a dosage block but the body carries a CAH hotspot call
     (same parser as ``_cah_hotspot_call``). Skips Overview (portal also skips Overview sections).
@@ -1740,7 +2245,7 @@ def _try_cah_hotspot_standalone_kv_html(title: str, body: str) -> Optional[str]:
         or dark_genes_display_title(title) == "Congenital Adrenal Hyperplasia (CAH)"
     ):
         return None
-    return _dl_kv_pdf_rows([("Hotspot mutations (7)", h)])
+    return _dl_kv_pdf_rows([("Hotspot mutations (7)", h)], lang=lang, text_localizer=text_localizer)
 
 
 def _alpha_thal_result_from_formula_line(raw: str, formula_key: str) -> Optional[str]:
@@ -1762,7 +2267,9 @@ def _alpha_thal_result_from_formula_line(raw: str, formula_key: str) -> Optional
     return None
 
 
-def _try_dosage_kv_html(title: str, body: str) -> Optional[str]:
+def _try_dosage_kv_html(
+    title: str, body: str, *, lang: str = "EN", text_localizer: Optional[Callable[[str], str]] = None
+) -> Optional[str]:
     """Match portal ``tryRenderDosageAnalysisSection`` (Est_CN/Ratio/WARNING; Alpha thal hba1/hba2; CAH depth + paralog)."""
     if not _dosage_title_matches(title):
         return None
@@ -1909,10 +2416,12 @@ def _try_dosage_kv_html(title: str, body: str) -> Optional[str]:
             rows.append(("hba1", hba1_val))
         if hba2_val is not None:
             rows.append(("hba2", hba2_val))
-    return _dl_kv_pdf_rows(rows)
+    return _dl_kv_pdf_rows(rows, lang=lang, text_localizer=text_localizer)
 
 
-def _try_generic_pipeline_kv_html(body: str) -> Optional[str]:
+def _try_generic_pipeline_kv_html(
+    body: str, *, lang: str = "EN", text_localizer: Optional[Callable[[str], str]] = None
+) -> Optional[str]:
     """
     Fallback: KEY=value lines, WARNING:, or single-line prose / ``Gene:value`` (e.g. FMR1:13/13).
     Keeps PDF readable without raw monospaced pipeline dumps when SMA/dosage matchers miss.
@@ -1944,11 +2453,12 @@ def _try_generic_pipeline_kv_html(body: str) -> Optional[str]:
             continue
         leftover.append(ln)
     if rows and not leftover:
-        return _dl_kv_pdf_rows(rows)
+        return _dl_kv_pdf_rows(rows, lang=lang, text_localizer=text_localizer)
     if rows and leftover:
-        return _dl_kv_pdf_rows(rows) + _dark_genes_pdf_prose_in_value_column(
+        leftover_text = chr(10).join(leftover)
+        return _dl_kv_pdf_rows(rows, lang=lang, text_localizer=text_localizer) + _dark_genes_pdf_prose_in_value_column(
             '<p style="white-space:pre-wrap;font-size:8pt;margin:0;line-height:1.45;'
-            f'color:#334155;">{html.escape(chr(10).join(leftover))}</p>'
+            f'color:#334155;">{html.escape(leftover_text)}</p>'
         )
     if len(lines) == 1:
         return _dark_genes_pdf_prose_in_value_column(
@@ -1961,41 +2471,50 @@ def _try_generic_pipeline_kv_html(body: str) -> Optional[str]:
     )
 
 
-def _section_body_portal_html_for_pdf(sec: Dict[str, Any]) -> str:
+def _section_body_portal_html_for_pdf(
+    sec: Dict[str, Any], *, lang: str = "EN", text_localizer: Optional[Callable[[str], str]] = None
+) -> str:
     """
     Same lab-facing labels as the portal Review tab (``tryRenderSmacaCheckSection`` /
     ``tryRenderDosageAnalysisSection``), not raw ``*_detailed_report.txt`` monospaced lines.
     """
     title = (sec.get("title") or "").strip()
     body = _section_body_for_pdf(sec.get("body") or "")
-    h = _try_smaca_kv_html(title, body)
+    h = _try_smaca_kv_html(title, body, lang=lang, text_localizer=text_localizer)
     if h:
         return h
-    h = _try_dosage_kv_html(title, body)
+    h = _try_dosage_kv_html(title, body, lang=lang, text_localizer=text_localizer)
     if h:
         return h
-    h = _try_cah_hotspot_standalone_kv_html(title, body)
+    h = _try_cah_hotspot_standalone_kv_html(title, body, lang=lang, text_localizer=text_localizer)
     if h:
         return h
-    h = _try_cftr_ivs9_eh_pdf_kv_html(title, body)
+    h = _try_cftr_ivs9_eh_pdf_kv_html(title, body, lang=lang, text_localizer=text_localizer)
     if h:
         return h
-    gh = _try_generic_pipeline_kv_html(body)
+    gh = _try_generic_pipeline_kv_html(body, lang=lang, text_localizer=text_localizer)
     return gh or ""
 
 
-def _eh_slash_allele_display(slash_val: Optional[str], *, tg: bool) -> Optional[str]:
+def _eh_slash_allele_display(slash_val: Optional[str], *, tg: bool, lang: str = "EN") -> Optional[str]:
     """Format ``7/7`` as ``7 / 7 (T repeats per allele)`` for PDF (match portal EH labels)."""
     if not slash_val or not str(slash_val).strip():
         return None
     parts = [p.strip() for p in str(slash_val).split("/") if p.strip() != ""]
     if len(parts) != 2:
         return None
-    suffix = "(TG repeats per allele)" if tg else "(T repeats per allele)"
+    if lang == "CN":
+        suffix = "(每條等位基因的 TG 重複數)" if tg else "(每條等位基因的 T 重複數)"
+    elif lang == "KO":
+        suffix = "(대립유전자당 TG 반복 수)" if tg else "(대립유전자당 T 반복 수)"
+    else:
+        suffix = "(TG repeats per allele)" if tg else "(T repeats per allele)"
     return f"{parts[0]} / {parts[1]} {suffix}"
 
 
-def _try_cftr_ivs9_eh_pdf_kv_html(title: str, body: str) -> Optional[str]:
+def _try_cftr_ivs9_eh_pdf_kv_html(
+    title: str, body: str, *, lang: str = "EN", text_localizer: Optional[Callable[[str], str]] = None
+) -> Optional[str]:
     """
     Customer PDF: for Expansion Hunter IVS9 lines (``CFTR_polyT=``, ``CFTR_TG=``), emit **only**
     Poly-T and TG REPCN rows — omit locus, per-allele narrative, risk text, and raw ``Raw EH REPCN`` dump.
@@ -2008,15 +2527,15 @@ def _try_cftr_ivs9_eh_pdf_kv_html(title: str, body: str) -> Optional[str]:
     if not eh:
         return None
     rows: List[Tuple[str, str]] = []
-    pt = _eh_slash_allele_display(eh.get("raw_poly_t"), tg=False)
+    pt = _eh_slash_allele_display(eh.get("raw_poly_t"), tg=False, lang=lang)
     if pt:
         rows.append(("Poly-T", pt))
-    tg_disp = _eh_slash_allele_display(eh.get("raw_tg"), tg=True)
+    tg_disp = _eh_slash_allele_display(eh.get("raw_tg"), tg=True, lang=lang)
     if tg_disp:
         rows.append(("TG", tg_disp))
     if not rows:
         return None
-    return _dl_kv_pdf_rows(rows)
+    return _dl_kv_pdf_rows(rows, lang=lang, text_localizer=text_localizer)
 
 
 def _dark_genes_finding_card_html(
@@ -2026,6 +2545,7 @@ def _dark_genes_finding_card_html(
     *,
     margin_top: str = "25px",
     risk_level: str = "high",
+    lang: str = "EN",
 ) -> str:
     """
     Match ``carrier_EN.html`` detailed blocks: left accent bar (green if ``risk_level``
@@ -2049,7 +2569,7 @@ def _dark_genes_finding_card_html(
     if notes:
         sub_int = (
             '<div style="font-size:8pt;font-weight:500;color:#64748b;text-transform:uppercase;'
-            'letter-spacing:0.02em;margin-top:10px;">Interpretation</div>'
+            f'letter-spacing:0.02em;margin-top:10px;">{html.escape(_dark_genes_ui_string("Interpretation", lang))}</div>'
         )
         esc = html.escape(notes, quote=True)
         notes_block = (
@@ -2069,6 +2589,8 @@ def detailed_sections_to_pdf_html(
     section_reviews: Optional[List[Dict[str, Any]]] = None,
     *,
     filter_by_approval: bool = False,
+    lang: str = "EN",
+    text_localizer: Optional[Callable[[str], str]] = None,
 ) -> str:
     """
     Escaped HTML blocks for WeasyPrint (carrier_*.html uses |safe).
@@ -2106,7 +2628,7 @@ def detailed_sections_to_pdf_html(
             continue
         notes = (rev.get("notes") or "").strip()
 
-        t = html.escape(dark_genes_display_title(sec.get("title")), quote=True)
+        t = html.escape(dark_genes_display_title(sec.get("title"), lang), quote=True)
         body_for_pdf = _section_body_for_pdf(sec.get("body") or "")
         b = html.escape(body_for_pdf, quote=True)
         kind = _infer_section_kind(sec)
@@ -2125,7 +2647,9 @@ def detailed_sections_to_pdf_html(
 
         if filter_by_approval:
             # Customer PDF: same layout as Detailed Interpretations (condition-heading + sub-labels).
-            portal_block = _section_body_portal_html_for_pdf(sec)
+            portal_block = _section_body_portal_html_for_pdf(
+                sec, lang=lang, text_localizer=text_localizer
+            )
             mt = "12px" if first_approved_card else "25px"
             first_approved_card = False
             parts.append(
@@ -2135,6 +2659,7 @@ def detailed_sections_to_pdf_html(
                     notes,
                     margin_top=mt,
                     risk_level=effective_risk_for_section(rev, sec),
+                    lang=lang,
                 )
             )
             continue
@@ -2143,7 +2668,8 @@ def detailed_sections_to_pdf_html(
         if notes:
             notes_html = (
                 f'<p style="font-size:8pt;color:#475569;margin:8px 0 0;line-height:1.4;">'
-                f"<strong>Notes:</strong> {html.escape(notes, quote=True)}</p>"
+                f"<strong>{html.escape(_dark_genes_ui_string('Notes', lang))}:</strong> "
+                f"{html.escape(notes, quote=True)}</p>"
             )
         parts.append(
             f'<div style="{box}">'
@@ -2241,6 +2767,7 @@ def dark_genes_supplemental_high_risk_summary_findings(
                     f"({gene_bit}) included with this carrier screen."
                 ),
                 "variant_summary": summary,
+                "_disp_title": disp_title,
             }
         )
     return out
@@ -2338,6 +2865,22 @@ def collect_dark_genes_from_analysis_dir(
     }
 
 
+def _section_review_item_from_storage(x: Any) -> Dict[str, Any]:
+    """Normalize one portal ``section_reviews`` row for PDF (preserve ``reviewer_set``)."""
+    if not isinstance(x, dict):
+        return {"approved": False, "notes": ""}
+    item: Dict[str, Any] = {
+        "approved": _coerce_approved_bool(x.get("approved")),
+        "notes": str(x.get("notes") or "")[:8000],
+    }
+    xr = x.get("risk")
+    if xr is not None and str(xr).strip() != "":
+        item["risk"] = _coerce_risk_level(xr)
+    if x.get("reviewer_set"):
+        item["reviewer_set"] = True
+    return item
+
+
 def dark_genes_for_pdf(report_block: Dict[str, Any]) -> Dict[str, Any]:
     """
     Subset for customer PDF (written into ``report.json`` — not the full ``dark_genes`` blob).
@@ -2371,17 +2914,7 @@ def dark_genes_for_pdf(report_block: Dict[str, Any]) -> Dict[str, Any]:
         raw = report_block.get("section_reviews")
         section_reviews = []
         for x in (raw if isinstance(raw, list) else []):
-            if isinstance(x, dict):
-                item: Dict[str, Any] = {
-                    "approved": _coerce_approved_bool(x.get("approved")),
-                    "notes": str(x.get("notes") or "")[:8000],
-                }
-                xr = x.get("risk")
-                if xr is not None and str(xr).strip() != "":
-                    item["risk"] = _coerce_risk_level(xr)
-                section_reviews.append(item)
-            else:
-                section_reviews.append({"approved": False, "notes": ""})
+            section_reviews.append(_section_review_item_from_storage(x))
 
     stored = report_block.get("detailed_sections")
     # Always prefer on-disk ``detailed_sections`` (same indices as portal ``section_reviews``).
@@ -2439,6 +2972,8 @@ def dark_genes_for_pdf(report_block: Dict[str, Any]) -> Dict[str, Any]:
     out_pdf: Dict[str, Any] = {
         "status": report_block.get("status"),
         "report_detailed_html": report_detailed_html,
+        "detailed_sections": sections,
+        "section_reviews": section_reviews,
         "supplemental_review_high_risk": bool(supplemental_findings),
         "supplemental_summary_findings": supplemental_findings,
     }

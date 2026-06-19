@@ -284,6 +284,11 @@
             text-align: justify;
             word-break: break-all;
         }
+        .gene-transcript-table { width:100%; border-collapse:collapse; font-size:7.5pt; margin-top:8px; table-layout:fixed; }
+        .gene-transcript-table th { background:#f1f5f9; color:#475569; font-weight:700; font-size:7pt; text-transform:uppercase; letter-spacing:.04em; padding:4px 6px; border:1px solid #e2e8f0; }
+        .gene-transcript-table td { padding:3px 6px; border:1px solid #e2e8f0; color:#334155; vertical-align:top; }
+        .gene-transcript-table td.gene-col { font-weight:600; }
+        .gene-transcript-table td.tx-col { font-family:monospace; color:#64748b; }
 
         /* Clinical statement */
         .clinical-statement {
@@ -647,7 +652,28 @@
         <strong>{{ data.genes_evaluated | length if data.genes_evaluated else '—' }}</strong> genes.
     </p>
     {% if data.genes_evaluated and data.genes_evaluated | length > 0 %}
+    {% if data.genes_evaluated_with_transcripts and data.genes_evaluated_with_transcripts | length > 0 %}
+    {% set rows = data.genes_evaluated_with_transcripts | batch(3) %}
+    <table class="gene-transcript-table">
+        <thead><tr>
+            <th class="gene-col">Gene</th><th class="tx-col">Transcript</th>
+            <th class="gene-col">Gene</th><th class="tx-col">Transcript</th>
+            <th class="gene-col">Gene</th><th class="tx-col">Transcript</th>
+        </tr></thead>
+        <tbody>
+        {% for row in rows %}
+        <tr>
+            {% for item in row %}
+            <td class="gene-col">{{ item.gene }}</td><td class="tx-col">{{ item.transcript or '—' }}</td>
+            {% endfor %}
+            {% if row | length < 3 %}{% for _ in range(3 - (row | length)) %}<td></td><td></td>{% endfor %}{% endif %}
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
     <div class="gene-list-grid">{{ data.genes_evaluated | join(', ') }}</div>
+    {% endif %}
     {% else %}
     <p class="detail-text" style="color:#64748b;font-size:8pt;">Gene list not available. Please refer to the panel definition.</p>
     {% endif %}

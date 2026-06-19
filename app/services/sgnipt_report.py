@@ -27,6 +27,40 @@ SGNIPT_PDF_TEMPLATE_STEM = "sgnipt"
 SGNIPT_SUPPORTED_LANGUAGES = ["EN", "KO"]
 SGNIPT_LOGO_FILENAME = "genolyx_logo.png"
 
+# --------------------------------------------------------------------------- #
+# MANE transcript lookup (cached)
+# --------------------------------------------------------------------------- #
+
+_mane_cache: Dict[str, Any] = {}
+
+
+def _get_mane_annotator() -> Optional[Any]:
+    """Return a cached MANEAnnotator instance using the configured MANE GFF path."""
+    try:
+        from app.config import settings
+        mane_gff = getattr(settings, "mane_gff", None) or ""
+    except Exception:
+        mane_gff = ""
+    if not mane_gff:
+        return None
+    if mane_gff not in _mane_cache:
+        try:
+            from .carrier_screening.annotator import MANEAnnotator
+            _mane_cache[mane_gff] = MANEAnnotator(mane_gff)
+        except Exception as exc:
+            logger.warning("[sgnipt_report] MANEAnnotator load failed: %s", exc)
+            _mane_cache[mane_gff] = None
+    return _mane_cache.get(mane_gff)
+
+
+def _build_gene_transcript_list(genes: List[str]) -> List[Dict[str, str]]:
+    """Return [{"gene": str, "transcript": str}] for the PDF gene+transcript table."""
+    mane = _get_mane_annotator()
+    return [
+        {"gene": g, "transcript": mane.lookup(g).get("nm", "") if mane else ""}
+        for g in genes
+    ]
+
 
 def _resolve_sgnipt_template_dir(template_dir: Optional[str] = None) -> Optional[str]:
     if template_dir and os.path.isdir(template_dir):
@@ -212,6 +246,48 @@ def _enrich_confirmed_variant(
     into a confirmed variant dict. Falls back gracefully when resources absent.
     """
     v = dict(cv)
+
+    # ── HGVSc / HGVSp from VEP sub-object or result.json clinical_findings ────
+    import re as _re_hgvs
+    _strip_tx = _re_hgvs.compile(r'^[A-Z0-9]+[\d._]*:')
+
+    def _norm_hgvs(s: str) -> str:
+        return _strip_tx.sub("", s or "")
+
+    # First, try to back-fill VEP from result.json by matching chrom:pos:ref:alt
+    # (portal may send old reviewData without VEP populated)
+    vep = v.get("vep") or {}
+    if not vep.get("hgvsc"):
+        _chrom = v.get("chrom", "")
+        _pos_raw = v.get("pos")
+        try:
+            _pos = int(_pos_raw)  # portal sends pos as string; result.json uses int
+        except (TypeError, ValueError):
+            _pos = _pos_raw
+        _ref = v.get("ref", "")
+        _alt = v.get("alt", "")
+        for cf in (result_data.get("clinical_findings") or []):
+            if (cf.get("chrom") == _chrom and cf.get("pos") == _pos
+                    and cf.get("ref") == _ref and cf.get("alt") == _alt):
+                cf_vep = cf.get("vep") or {}
+                if cf_vep.get("hgvsc"):
+                    vep = cf_vep
+                    v["vep"] = vep
+                break
+
+    # hgvsc: prefer vep.hgvsc → v.hgvsc; only use if it starts with c./n./g.
+    raw_c = vep.get("hgvsc") or v.get("hgvsc") or ""
+    stripped_c = _norm_hgvs(raw_c)
+    if stripped_c.startswith(("c.", "n.", "g.", "r.")):
+        v["hgvsc"] = stripped_c
+    elif not v.get("hgvsc"):
+        v["hgvsc"] = stripped_c or None
+    # hgvsp: prefer vep.hgvsp → v.hgvsp
+    raw_p = vep.get("hgvsp") or v.get("hgvsp") or ""
+    v["hgvsp"] = _norm_hgvs(raw_p) or None
+    # gene from VEP symbol fallback
+    if vep.get("symbol") and not v.get("gene"):
+        v["gene"] = vep["symbol"]
 
     # Normalise origin display
     raw_origin = (v.get("origin") or "").lower()
@@ -452,6 +528,9 @@ def generate_sgnipt_report_json(
         "upd": _build_upd_data(result_data),
         "qc": _build_qc(result_data),
         "genes_evaluated": _extract_genes_evaluated(result_data),
+        "genes_evaluated_with_transcripts": _build_gene_transcript_list(
+            _extract_genes_evaluated(result_data)
+        ),
         "variant_analysis_summary": result_data.get("variant_analysis_summary") or {},
         # dark_genes populated later from result.json sibling if present
         "dark_genes": None,

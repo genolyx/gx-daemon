@@ -1,0 +1,1338 @@
+{
+  "_metadata": {
+    "version": "1.1.0",
+    "description": "Gene-disease mapping for Proactive Health Screen panel (ACMG SF v3.2 + cardiovascular genes)",
+    "source": "ACMG SF v3.2, ClinGen, GeneReviews",
+    "last_updated": "2026-05-30",
+    "total_genes": 163
+  },
+  "diseases": [
+    {
+      "disease_name": "X-linked adrenoleukodystrophy",
+      "disease_name_cn": "X连锁肾上腺脑白质营养不良",
+      "genes": [
+        "ABCD1"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Familial thoracic aortic aneurysm and dissection",
+      "disease_name_cn": "家族性胸主动脉瘤和夹层",
+      "genes": [
+        "ACTA2"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Familial hypertrophic cardiomyopathy",
+      "disease_name_cn": "家族性肥厚型心肌病",
+      "genes": [
+        "ACTC1"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Dilated cardiomyopathy",
+      "disease_name_cn": "扩张型心肌病",
+      "genes": [
+        "ACTN2"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Hereditary hemorrhagic telangiectasia type 2",
+      "disease_name_cn": "遗传性出血性毛细血管扩张症2型",
+      "genes": [
+        "ACVRL1"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Familial adenomatous polyposis",
+      "disease_name_cn": "家族性腺瘤性息肉病",
+      "genes": [
+        "APC"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Familial hypercholesterolemia",
+      "disease_name_cn": "家族性高胆固醇血症",
+      "genes": [
+        "APOB"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Ataxia-telangiectasia",
+      "disease_name_cn": "共济失调毛细血管扩张症",
+      "genes": [
+        "ATM"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Wilson disease",
+      "disease_name_cn": "威尔逊病",
+      "genes": [
+        "ATP7B"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Polyposis and cancer predisposition syndrome",
+      "disease_name_cn": "息肉病及癌症易感综合征",
+      "genes": [
+        "AXIN2"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Familial dilated cardiomyopathy",
+      "disease_name_cn": "家族性扩张型心肌病",
+      "genes": [
+        "BAG3"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "BAP1 tumor predisposition syndrome",
+      "disease_name_cn": "BAP1肿瘤易感综合征",
+      "genes": [
+        "BAP1"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Hereditary breast and ovarian cancer syndrome",
+      "disease_name_cn": "遗传性乳腺癌和卵巢癌综合征",
+      "genes": [
+        "BARD1"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Juvenile polyposis syndrome",
+      "disease_name_cn": "幼年性息肉病综合征",
+      "genes": [
+        "BMPR1A"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Hereditary pulmonary arterial hypertension",
+      "disease_name_cn": "遗传性肺动脉高压",
+      "genes": [
+        "BMPR2"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Hereditary breast and ovarian cancer syndrome (HBOC)",
+      "disease_name_cn": "遗传性乳腺癌和卵巢癌综合征",
+      "genes": [
+        "BRCA1"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Hereditary breast and ovarian cancer syndrome (HBOC)",
+      "disease_name_cn": "遗传性乳腺癌和卵巢癌综合征",
+      "genes": [
+        "BRCA2"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Hereditary breast and ovarian cancer syndrome",
+      "disease_name_cn": "遗传性乳腺癌和卵巢癌综合征",
+      "genes": [
+        "BRIP1"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Biotinidase deficiency",
+      "disease_name_cn": "生物素酶缺乏症",
+      "genes": [
+        "BTD"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Timothy syndrome / Long QT syndrome",
+      "disease_name_cn": "Timothy综合征/长QT综合征",
+      "genes": [
+        "CACNA1C"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Malignant hyperthermia susceptibility",
+      "disease_name_cn": "恶性高热易感性",
+      "genes": [
+        "CACNA1S"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Calmodulinopathy (Long QT / CPVT)",
+      "disease_name_cn": "钙调蛋白病（长QT/儿茶酚胺敏感性多形性室速）",
+      "genes": [
+        "CALM1"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Calmodulinopathy (Long QT / CPVT)",
+      "disease_name_cn": "钙调蛋白病（长QT/儿茶酚胺敏感性多形性室速）",
+      "genes": [
+        "CALM2"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Calmodulinopathy (Long QT / CPVT)",
+      "disease_name_cn": "钙调蛋白病（长QT/儿茶酚胺敏感性多形性室速）",
+      "genes": [
+        "CALM3"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Catecholaminergic polymorphic ventricular tachycardia",
+      "disease_name_cn": "儿茶酚胺敏感性多形性室性心动过速",
+      "genes": [
+        "CASQ2"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Pulmonary arterial hypertension",
+      "disease_name_cn": "肺动脉高压",
+      "genes": [
+        "CAV1"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Arrhythmogenic cardiomyopathy",
+      "disease_name_cn": "致心律失常性心肌病",
+      "genes": [
+        "CAV3"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Hyperparathyroidism-jaw tumor syndrome",
+      "disease_name_cn": "甲状旁腺功能亢进-颌骨肿瘤综合征",
+      "genes": [
+        "CDC73"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Hereditary diffuse gastric cancer",
+      "disease_name_cn": "遗传性弥漫性胃癌",
+      "genes": [
+        "CDH1"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Melanoma predisposition",
+      "disease_name_cn": "黑色素瘤易感",
+      "genes": [
+        "CDK4"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Multiple endocrine neoplasia type 4",
+      "disease_name_cn": "多发性内分泌肿瘤4型",
+      "genes": [
+        "CDKN1B"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Familial melanoma / pancreatic cancer susceptibility",
+      "disease_name_cn": "家族性黑色素瘤/胰腺癌易感",
+      "genes": [
+        "CDKN2A"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Hereditary breast cancer",
+      "disease_name_cn": "遗传性乳腺癌",
+      "genes": [
+        "CHEK2"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Vascular Ehlers-Danlos syndrome",
+      "disease_name_cn": "血管型Ehlers-Danlos综合征",
+      "genes": [
+        "COL3A1"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Classical Ehlers-Danlos syndrome",
+      "disease_name_cn": "经典型Ehlers-Danlos综合征",
+      "genes": [
+        "COL5A1"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Classical Ehlers-Danlos syndrome",
+      "disease_name_cn": "经典型Ehlers-Danlos综合征",
+      "genes": [
+        "COL5A2"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Myofibrillar myopathy / cardiomyopathy",
+      "disease_name_cn": "肌原纤维性肌病/心肌病",
+      "genes": [
+        "CRYAB"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Dilated cardiomyopathy",
+      "disease_name_cn": "扩张型心肌病",
+      "genes": [
+        "CSRP3"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Desmin-related myopathy",
+      "disease_name_cn": "结蛋白相关肌病",
+      "genes": [
+        "DES"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "DICER1 syndrome / pleuropulmonary blastoma",
+      "disease_name_cn": "DICER1综合征/胸肺母细胞瘤",
+      "genes": [
+        "DICER1"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Duchenne/Becker muscular dystrophy",
+      "disease_name_cn": "杜氏/贝氏肌营养不良",
+      "genes": [
+        "DMD"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Arrhythmogenic right ventricular cardiomyopathy",
+      "disease_name_cn": "致心律失常性右室心肌病",
+      "genes": [
+        "DSC2"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Arrhythmogenic right ventricular cardiomyopathy",
+      "disease_name_cn": "致心律失常性右室心肌病",
+      "genes": [
+        "DSG2"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Arrhythmogenic right ventricular cardiomyopathy",
+      "disease_name_cn": "致心律失常性右室心肌病",
+      "genes": [
+        "DSP"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Non-small cell lung cancer (therapeutic)",
+      "disease_name_cn": "非小细胞肺癌（治疗相关）",
+      "genes": [
+        "EGFR"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Emery-Dreifuss muscular dystrophy",
+      "disease_name_cn": "Emery-Dreifuss肌营养不良",
+      "genes": [
+        "EMD"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Hereditary hemorrhagic telangiectasia type 1",
+      "disease_name_cn": "遗传性出血性毛细血管扩张症1型",
+      "genes": [
+        "ENG"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Lynch syndrome",
+      "disease_name_cn": "林奇综合征",
+      "genes": [
+        "EPCAM"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Factor XI deficiency",
+      "disease_name_cn": "凝血因子XI缺乏症",
+      "genes": [
+        "F11"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Prothrombin thrombophilia",
+      "disease_name_cn": "凝血酶原血栓倾向",
+      "genes": [
+        "F2"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Factor V Leiden thrombophilia",
+      "disease_name_cn": "因子V Leiden血栓倾向",
+      "genes": [
+        "F5"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Hemophilia B",
+      "disease_name_cn": "血友病B",
+      "genes": [
+        "F9"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Marfan syndrome",
+      "disease_name_cn": "马凡综合征",
+      "genes": [
+        "FBN1"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Hereditary leiomyomatosis and renal cell cancer",
+      "disease_name_cn": "遗传性平滑肌瘤病和肾细胞癌",
+      "genes": [
+        "FH"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Emery-Dreifuss muscular dystrophy",
+      "disease_name_cn": "Emery-Dreifuss肌营养不良",
+      "genes": [
+        "FHL1"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Birt-Hogg-Dubé syndrome",
+      "disease_name_cn": "Birt-Hogg-Dubé综合征",
+      "genes": [
+        "FLCN"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Myofibrillar myopathy",
+      "disease_name_cn": "肌原纤维性肌病",
+      "genes": [
+        "FLNC"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "G6PD deficiency",
+      "disease_name_cn": "葡萄糖-6-磷酸脱氢酶缺乏症",
+      "genes": [
+        "G6PD"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Pompe disease",
+      "disease_name_cn": "庞贝病",
+      "genes": [
+        "GAA"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "GTP cyclohydrolase deficiency (DOPA-responsive dystonia)",
+      "disease_name_cn": "GTP环化水解酶缺乏症",
+      "genes": [
+        "GCH1"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Hereditary pulmonary arterial hypertension",
+      "disease_name_cn": "遗传性肺动脉高压",
+      "genes": [
+        "GDF2"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Fabry disease",
+      "disease_name_cn": "法布里病",
+      "genes": [
+        "GLA"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Hereditary mixed polyposis syndrome",
+      "disease_name_cn": "遗传性混合性息肉病综合征",
+      "genes": [
+        "GREM1"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Juvenile hemochromatosis type 2B",
+      "disease_name_cn": "青少年型血色病2B型",
+      "genes": [
+        "HAMP"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Sinus node dysfunction / Brugada syndrome",
+      "disease_name_cn": "窦房结功能障碍/Brugada综合征",
+      "genes": [
+        "HCN4"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Hereditary hemochromatosis",
+      "disease_name_cn": "遗传性血色病",
+      "genes": [
+        "HFE"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Juvenile hemochromatosis type 2A",
+      "disease_name_cn": "青少年型血色病2A型",
+      "genes": [
+        "HJV"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Acute intermittent porphyria",
+      "disease_name_cn": "急性间歇性卟啉病",
+      "genes": [
+        "HMBS"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Maturity-onset diabetes of the young type 3 (MODY3)",
+      "disease_name_cn": "青少年发病的成人型糖尿病3型",
+      "genes": [
+        "HNF1A"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Renal cysts and diabetes syndrome (MODY5)",
+      "disease_name_cn": "肾囊肿和糖尿病综合征",
+      "genes": [
+        "HNF1B"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Hereditary prostate cancer",
+      "disease_name_cn": "遗传性前列腺癌",
+      "genes": [
+        "HOXB13"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Naxos disease / arrhythmogenic cardiomyopathy",
+      "disease_name_cn": "Naxos病/致心律失常性心肌病",
+      "genes": [
+        "JUP"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Long QT syndrome type 5",
+      "disease_name_cn": "长QT综合征5型",
+      "genes": [
+        "KCNE1"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Long QT syndrome type 2",
+      "disease_name_cn": "长QT综合征2型",
+      "genes": [
+        "KCNH2"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Andersen-Tawil syndrome",
+      "disease_name_cn": "Andersen-Tawil综合征",
+      "genes": [
+        "KCNJ2"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Long QT syndrome type 1",
+      "disease_name_cn": "长QT综合征1型",
+      "genes": [
+        "KCNQ1"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Gastrointestinal stromal tumor predisposition",
+      "disease_name_cn": "胃肠道间质瘤易感",
+      "genes": [
+        "KIT"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Danon disease",
+      "disease_name_cn": "Danon病",
+      "genes": [
+        "LAMP2"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Familial hypercholesterolemia",
+      "disease_name_cn": "家族性高胆固醇血症",
+      "genes": [
+        "LDLR"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Autosomal recessive hypercholesterolemia",
+      "disease_name_cn": "常染色体隐性高胆固醇血症",
+      "genes": [
+        "LDLRAP1"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Lamin A/C cardiomyopathy and muscular dystrophy",
+      "disease_name_cn": "核纤层蛋白A/C心肌病和肌营养不良",
+      "genes": [
+        "LMNA"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Schwannomatosis / Noonan syndrome",
+      "disease_name_cn": "神经鞘瘤病/努南综合征",
+      "genes": [
+        "LZTR1"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Hereditary paraganglioma/pheochromocytoma syndrome",
+      "disease_name_cn": "遗传性副神经节瘤/嗜铬细胞瘤综合征",
+      "genes": [
+        "MAX"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Familial Mediterranean fever",
+      "disease_name_cn": "家族性地中海热",
+      "genes": [
+        "MEFV"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Multiple endocrine neoplasia type 1",
+      "disease_name_cn": "多发性内分泌肿瘤1型",
+      "genes": [
+        "MEN1"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Hereditary papillary renal cell carcinoma",
+      "disease_name_cn": "遗传性乳头状肾细胞癌",
+      "genes": [
+        "MET"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Melanoma and renal cell carcinoma predisposition",
+      "disease_name_cn": "黑色素瘤和肾细胞癌易感",
+      "genes": [
+        "MITF"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Lynch syndrome",
+      "disease_name_cn": "林奇综合征",
+      "genes": [
+        "MLH1"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Lynch syndrome",
+      "disease_name_cn": "林奇综合征",
+      "genes": [
+        "MSH2"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Lynch syndrome",
+      "disease_name_cn": "林奇综合征",
+      "genes": [
+        "MSH3"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Lynch syndrome",
+      "disease_name_cn": "林奇综合征",
+      "genes": [
+        "MSH6"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "MUTYH-associated polyposis",
+      "disease_name_cn": "MUTYH相关息肉病",
+      "genes": [
+        "MUTYH"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Hypertrophic cardiomyopathy",
+      "disease_name_cn": "肥厚型心肌病",
+      "genes": [
+        "MYBPC3"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Familial thoracic aortic aneurysm and dissection",
+      "disease_name_cn": "家族性胸主动脉瘤和夹层",
+      "genes": [
+        "MYH11"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Hypertrophic cardiomyopathy",
+      "disease_name_cn": "肥厚型心肌病",
+      "genes": [
+        "MYH7"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Hypertrophic cardiomyopathy",
+      "disease_name_cn": "肥厚型心肌病",
+      "genes": [
+        "MYL2"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Hypertrophic cardiomyopathy",
+      "disease_name_cn": "肥厚型心肌病",
+      "genes": [
+        "MYL3"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Familial thoracic aortic aneurysm and dissection",
+      "disease_name_cn": "家族性胸主动脉瘤和夹层",
+      "genes": [
+        "MYLK"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Neurofibromatosis type 1",
+      "disease_name_cn": "1型神经纤维瘤病",
+      "genes": [
+        "NF1"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Neurofibromatosis type 2",
+      "disease_name_cn": "2型神经纤维瘤病",
+      "genes": [
+        "NF2"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "NTHL1-associated polyposis",
+      "disease_name_cn": "NTHL1相关息肉病",
+      "genes": [
+        "NTHL1"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Ornithine transcarbamylase deficiency",
+      "disease_name_cn": "鸟氨酸氨甲酰基转移酶缺乏症",
+      "genes": [
+        "OTC"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Hereditary breast and ovarian cancer syndrome",
+      "disease_name_cn": "遗传性乳腺癌和卵巢癌综合征",
+      "genes": [
+        "PALB2"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Familial hypercholesterolemia",
+      "disease_name_cn": "家族性高胆固醇血症",
+      "genes": [
+        "PCSK9"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Gastrointestinal stromal tumor predisposition",
+      "disease_name_cn": "胃肠道间质瘤易感",
+      "genes": [
+        "PDGFRA"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Arrhythmogenic right ventricular cardiomyopathy",
+      "disease_name_cn": "致心律失常性右室心肌病",
+      "genes": [
+        "PKP2"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Arrhythmogenic / dilated cardiomyopathy",
+      "disease_name_cn": "致心律失常性/扩张型心肌病",
+      "genes": [
+        "PLN"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Lynch syndrome",
+      "disease_name_cn": "林奇综合征",
+      "genes": [
+        "PMS2"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Polymerase proofreading-associated polyposis",
+      "disease_name_cn": "聚合酶校正相关息肉病",
+      "genes": [
+        "POLD1"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Polymerase proofreading-associated polyposis",
+      "disease_name_cn": "聚合酶校正相关息肉病",
+      "genes": [
+        "POLE"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "POT1 tumor predisposition syndrome",
+      "disease_name_cn": "POT1肿瘤易感综合征",
+      "genes": [
+        "POT1"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Glycogen storage disease of heart / WPW syndrome",
+      "disease_name_cn": "心脏糖原贮积病/WPW综合征",
+      "genes": [
+        "PRKAG2"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Carney complex",
+      "disease_name_cn": "Carney复合征",
+      "genes": [
+        "PRKAR1A"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Familial thoracic aortic aneurysm and dissection",
+      "disease_name_cn": "家族性胸主动脉瘤和夹层",
+      "genes": [
+        "PRKG1"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Protein C deficiency",
+      "disease_name_cn": "蛋白C缺乏症",
+      "genes": [
+        "PROC"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Protein S deficiency",
+      "disease_name_cn": "蛋白S缺乏症",
+      "genes": [
+        "PROS1"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Gorlin syndrome",
+      "disease_name_cn": "Gorlin综合征（痣样基底细胞癌综合征）",
+      "genes": [
+        "PTCH1"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "PTEN hamartoma tumor syndrome",
+      "disease_name_cn": "PTEN错构瘤肿瘤综合征",
+      "genes": [
+        "PTEN"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Hereditary breast and ovarian cancer syndrome",
+      "disease_name_cn": "遗传性乳腺癌和卵巢癌综合征",
+      "genes": [
+        "RAD51C"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Hereditary breast and ovarian cancer syndrome",
+      "disease_name_cn": "遗传性乳腺癌和卵巢癌综合征",
+      "genes": [
+        "RAD51D"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Retinoblastoma / hereditary retinoblastoma",
+      "disease_name_cn": "视网膜母细胞瘤/遗传性视网膜母细胞瘤",
+      "genes": [
+        "RB1"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Familial dilated cardiomyopathy",
+      "disease_name_cn": "家族性扩张型心肌病",
+      "genes": [
+        "RBM20"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Multiple endocrine neoplasia type 2",
+      "disease_name_cn": "多发性内分泌肿瘤2型",
+      "genes": [
+        "RET"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Leber congenital amaurosis / retinitis pigmentosa",
+      "disease_name_cn": "Leber先天性黑矇/视网膜色素变性",
+      "genes": [
+        "RPE65"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Malignant hyperthermia susceptibility / central core disease",
+      "disease_name_cn": "恶性高热易感性/中央轴空病",
+      "genes": [
+        "RYR1"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Catecholaminergic polymorphic ventricular tachycardia",
+      "disease_name_cn": "儿茶酚胺敏感性多形性室性心动过速",
+      "genes": [
+        "RYR2"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Brugada syndrome / Long QT syndrome type 3",
+      "disease_name_cn": "Brugada综合征/长QT综合征3型",
+      "genes": [
+        "SCN5A"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Hereditary paraganglioma/pheochromocytoma syndrome",
+      "disease_name_cn": "遗传性副神经节瘤/嗜铬细胞瘤综合征",
+      "genes": [
+        "SDHA"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Hereditary paraganglioma/pheochromocytoma syndrome",
+      "disease_name_cn": "遗传性副神经节瘤/嗜铬细胞瘤综合征",
+      "genes": [
+        "SDHAF2"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Hereditary paraganglioma/pheochromocytoma syndrome",
+      "disease_name_cn": "遗传性副神经节瘤/嗜铬细胞瘤综合征",
+      "genes": [
+        "SDHB"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Hereditary paraganglioma/pheochromocytoma syndrome",
+      "disease_name_cn": "遗传性副神经节瘤/嗜铬细胞瘤综合征",
+      "genes": [
+        "SDHC"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Hereditary paraganglioma/pheochromocytoma syndrome",
+      "disease_name_cn": "遗传性副神经节瘤/嗜铬细胞瘤综合征",
+      "genes": [
+        "SDHD"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Alpha-1 antitrypsin deficiency",
+      "disease_name_cn": "α1-抗胰蛋白酶缺乏症",
+      "genes": [
+        "SERPINA1"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Antithrombin III deficiency",
+      "disease_name_cn": "抗凝血酶III缺乏症",
+      "genes": [
+        "SERPINC1"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Limb-girdle muscular dystrophy type 2F",
+      "disease_name_cn": "2F型肢带型肌营养不良",
+      "genes": [
+        "SGCD"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Ferroportin disease (hemochromatosis type 4)",
+      "disease_name_cn": "膜铁转运蛋白病（血色病4型）",
+      "genes": [
+        "SLC40A1"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Loeys-Dietz syndrome type 3",
+      "disease_name_cn": "Loeys-Dietz综合征3型",
+      "genes": [
+        "SMAD3"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Juvenile polyposis / hereditary hemorrhagic telangiectasia",
+      "disease_name_cn": "幼年性息肉病/遗传性出血性毛细血管扩张症",
+      "genes": [
+        "SMAD4"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Pulmonary arterial hypertension",
+      "disease_name_cn": "肺动脉高压",
+      "genes": [
+        "SMAD9"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Rhabdoid tumor predisposition syndrome",
+      "disease_name_cn": "横纹肌样瘤易感综合征",
+      "genes": [
+        "SMARCA4"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Rhabdoid tumor predisposition syndrome",
+      "disease_name_cn": "横纹肌样瘤易感综合征",
+      "genes": [
+        "SMARCB1"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Peutz-Jeghers syndrome",
+      "disease_name_cn": "Peutz-Jeghers综合征",
+      "genes": [
+        "STK11"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Limb-girdle muscular dystrophy / cardiomyopathy",
+      "disease_name_cn": "肢带型肌营养不良/心肌病",
+      "genes": [
+        "TCAP"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Hemochromatosis type 3",
+      "disease_name_cn": "血色病3型",
+      "genes": [
+        "TFR2"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Loeys-Dietz syndrome type 4",
+      "disease_name_cn": "Loeys-Dietz综合征4型",
+      "genes": [
+        "TGFB2"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Loeys-Dietz syndrome type 5",
+      "disease_name_cn": "Loeys-Dietz综合征5型",
+      "genes": [
+        "TGFB3"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Loeys-Dietz syndrome type 1",
+      "disease_name_cn": "Loeys-Dietz综合征1型",
+      "genes": [
+        "TGFBR1"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Loeys-Dietz syndrome type 2",
+      "disease_name_cn": "Loeys-Dietz综合征2型",
+      "genes": [
+        "TGFBR2"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Hereditary paraganglioma/pheochromocytoma syndrome",
+      "disease_name_cn": "遗传性副神经节瘤/嗜铬细胞瘤综合征",
+      "genes": [
+        "TMEM127"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Arrhythmogenic right ventricular cardiomyopathy",
+      "disease_name_cn": "致心律失常性右室心肌病",
+      "genes": [
+        "TMEM43"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Hypertrophic cardiomyopathy",
+      "disease_name_cn": "肥厚型心肌病",
+      "genes": [
+        "TNNC1"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Hypertrophic cardiomyopathy",
+      "disease_name_cn": "肥厚型心肌病",
+      "genes": [
+        "TNNI3"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Hypertrophic cardiomyopathy",
+      "disease_name_cn": "肥厚型心肌病",
+      "genes": [
+        "TNNT2"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Li-Fraumeni syndrome",
+      "disease_name_cn": "Li-Fraumeni综合征",
+      "genes": [
+        "TP53"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Hypertrophic cardiomyopathy",
+      "disease_name_cn": "肥厚型心肌病",
+      "genes": [
+        "TPM1"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Catecholaminergic polymorphic ventricular tachycardia",
+      "disease_name_cn": "儿茶酚胺敏感性多形性室性心动过速",
+      "genes": [
+        "TRDN"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Tuberous sclerosis complex",
+      "disease_name_cn": "结节性硬化症",
+      "genes": [
+        "TSC1"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Tuberous sclerosis complex",
+      "disease_name_cn": "结节性硬化症",
+      "genes": [
+        "TSC2"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Dilated cardiomyopathy",
+      "disease_name_cn": "扩张型心肌病",
+      "genes": [
+        "TTN"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Hereditary transthyretin amyloidosis",
+      "disease_name_cn": "遗传性转甲状腺素蛋白淀粉样变性",
+      "genes": [
+        "TTR"
+      ],
+      "category": "other"
+    },
+    {
+      "disease_name": "Dilated cardiomyopathy",
+      "disease_name_cn": "扩张型心肌病",
+      "genes": [
+        "VCL"
+      ],
+      "category": "cardio"
+    },
+    {
+      "disease_name": "Von Hippel-Lindau syndrome",
+      "disease_name_cn": "Von Hippel-Lindau综合征",
+      "genes": [
+        "VHL"
+      ],
+      "category": "cancer"
+    },
+    {
+      "disease_name": "Denys-Drash syndrome / Wilms tumor predisposition",
+      "disease_name_cn": "Denys-Drash综合征/肾母细胞瘤易感",
+      "genes": [
+        "WT1"
+      ],
+      "category": "cancer"
+    }
+  ],
+  "categories": [
+    {
+      "id": "cancer",
+      "label_en": "Cancer predisposition",
+      "label_cn": "肿瘤易感",
+      "label_ko": "암 발생 소인",
+      "order": 1
+    },
+    {
+      "id": "cardio",
+      "label_en": "Cardiovascular",
+      "label_cn": "心血管",
+      "label_ko": "심혈관",
+      "order": 2
+    },
+    {
+      "id": "other",
+      "label_en": "Metabolic, hematologic & other",
+      "label_cn": "代谢、血液及其他",
+      "label_ko": "대사·혈액 및 기타",
+      "order": 3
+    }
+  ]
+}
