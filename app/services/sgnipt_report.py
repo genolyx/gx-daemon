@@ -14,6 +14,7 @@ import base64
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -413,11 +414,27 @@ def _extract_genes_evaluated(result_data: Dict[str, Any]) -> List[str]:
             gene = _extract_gene_from_target_name(tn)
         if gene:
             genes.add(gene)
-    # Check gene_coverage_validation keys
+    # Extract actual gene symbols from gene_coverage_validation
+    # Use the gene lists (not metadata keys) from this dict
     gcv = result_data.get("gene_coverage_validation") or {}
-    for g in gcv.keys():
-        if g:
-            genes.add(g.strip().upper())
+    for key in ("genes_covered_by_panel", "extra_genes", "missing_genes"):
+        val = gcv.get(key)
+        if isinstance(val, list):
+            for g in val:
+                s = str(g).strip().upper()
+                if s and re.match(r'^[A-Z][A-Z0-9\-]{0,30}$', s):
+                    genes.add(s)
+        elif isinstance(val, str) and val.strip().startswith('['):
+            # Stringified Python list: "['GENE1', 'GENE2', ...]"
+            import ast
+            try:
+                items = ast.literal_eval(val)
+                for g in (items if isinstance(items, list) else []):
+                    s = str(g).strip().upper()
+                    if s and re.match(r'^[A-Z][A-Z0-9\-]{0,30}$', s):
+                        genes.add(s)
+            except Exception:
+                pass
     return sorted(genes)
 
 
@@ -504,6 +521,7 @@ def generate_sgnipt_report_json(
     report_data = {
         "report_metadata": {
             "order_id": order_id,
+            "sample_name": sample_name,
             "report_date": now_str,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "hospital": pi.get("hospital") or ri.get("hospital") or "",
@@ -631,7 +649,9 @@ def generate_sgnipt_report_pdf(
             logger.error("[sgnipt_report] Template %s not found in %s", tpl_name, resolved_template_dir)
             continue
 
-        pdf_name = f"report_{lang_up}.pdf"
+        _meta = report_data.get("report_metadata") or {}
+        _oid = re.sub(r'[^\w\-]', '_', _meta.get("order_id") or 'order')
+        pdf_name = f"Report_{_oid}_{lang_up}.pdf"
         pdf_path = os.path.join(output_dir, pdf_name)
         try:
             base_url = resolved_template_dir or output_dir
