@@ -242,22 +242,34 @@ async def get_client_info(order) -> Optional[ClientDetailResponse]:
 # ─── Platform notification (from service-daemon platform_client) ──
 
 class PlatformClient:
-    """Unified platform client for status updates, uploads, notifications."""
+    """Unified platform client for status updates, uploads, notifications.
+
+    Per-order callback_url support:
+      - Pass callback_url to any method to override the global PLATFORM_API_BASE.
+      - Omit (or pass None) to use the global default (Gx-Portal backward-compat).
+    """
 
     def __init__(self):
         self.base_url = settings.platform_api_base.rstrip("/")
+
+    def _resolve_base(self, callback_url: Optional[str] = None) -> str:
+        """Return per-job callback base URL if provided, else fall back to global config."""
+        if callback_url:
+            return callback_url.rstrip("/")
+        return self.base_url
 
     @staticmethod
     def _skipped(msg: str = "Platform API disabled") -> NotificationResult:
         return NotificationResult(status=NotificationStatus.SKIPPED, message=msg)
 
     async def update_order_status(
-        self, order_id: str, service_code: str, status: str, progress: int = 0, message: str = ""
+        self, order_id: str, service_code: str, status: str, progress: int = 0, message: str = "",
+        callback_url: Optional[str] = None,
     ) -> NotificationResult:
         try:
             if not settings.platform_api_enabled:
                 return self._skipped()
-            url = f"{self.base_url}/analysis/order/{order_id}/status"
+            url = f"{self._resolve_base(callback_url)}/analysis/order/{order_id}/status"
             payload = {"status": status, "progress": progress, "message": message}
             response = await auth_request(method="PATCH", url=url, json=payload, timeout=10.0)
             return NotificationResult(
@@ -268,12 +280,13 @@ class PlatformClient:
             return NotificationResult(status=NotificationStatus.FAILED, message=str(e))
 
     async def notify_analysis_result(
-        self, order_id: str, service_code: str, success: bool = True, log: str = ""
+        self, order_id: str, service_code: str, success: bool = True, log: str = "",
+        callback_url: Optional[str] = None,
     ) -> NotificationResult:
         try:
             if not settings.platform_api_enabled:
                 return self._skipped()
-            url = f"{self.base_url}/analysis/result/{order_id}"
+            url = f"{self._resolve_base(callback_url)}/analysis/result/{order_id}"
             payload = {"success": success, "log": log}
             await auth_request(method="DELETE", url=url, timeout=10.0)
             response = await auth_request(method="POST", url=url, json=payload, timeout=30.0)
@@ -285,12 +298,13 @@ class PlatformClient:
             return NotificationResult(status=NotificationStatus.FAILED, message=str(e))
 
     async def notify_analysis_failed(
-        self, order_id: str, service_code: str, error: str
+        self, order_id: str, service_code: str, error: str,
+        callback_url: Optional[str] = None,
     ) -> NotificationResult:
         try:
             if not settings.platform_api_enabled:
                 return self._skipped()
-            url = f"{self.base_url}/analysis/order/{order_id}/failed"
+            url = f"{self._resolve_base(callback_url)}/analysis/order/{order_id}/failed"
             payload = {"failedReason": error}
             response = await auth_request(method="PATCH", url=url, json=payload, timeout=10.0)
             return NotificationResult(
@@ -300,14 +314,16 @@ class PlatformClient:
             logger.error(f"notify_analysis_failed for {order_id}: {e}")
             return NotificationResult(status=NotificationStatus.FAILED, message=str(e))
 
-    async def upload_analysis_file(self, order_id: str, tar_path: str) -> NotificationResult:
+    async def upload_analysis_file(
+        self, order_id: str, tar_path: str, callback_url: Optional[str] = None
+    ) -> NotificationResult:
         try:
             if not settings.platform_api_enabled:
                 return self._skipped()
             if not os.path.exists(tar_path):
                 return NotificationResult(status=NotificationStatus.NOT_FOUND, message=f"File not found: {tar_path}")
 
-            url = f"{self.base_url}/analysis/result/{order_id}/file"
+            url = f"{self._resolve_base(callback_url)}/analysis/result/{order_id}/file"
             await auth_request(method="DELETE", url=url, timeout=30.0)
 
             for attempt in range(3):
@@ -332,7 +348,8 @@ class PlatformClient:
             return NotificationResult(status=NotificationStatus.FAILED, message=str(e))
 
     async def upload_pdf_report(
-        self, order_id: str, pdf_path: str, *, signed: bool = False
+        self, order_id: str, pdf_path: str, *, signed: bool = False,
+        callback_url: Optional[str] = None,
     ) -> NotificationResult:
         try:
             if not settings.platform_api_enabled:
@@ -340,10 +357,11 @@ class PlatformClient:
             if not os.path.exists(pdf_path):
                 return NotificationResult(status=NotificationStatus.NOT_FOUND, message=f"PDF not found: {pdf_path}")
 
+            base = self._resolve_base(callback_url)
             if signed:
-                url = f"{self.base_url}/analysis/order/{order_id}/signed-pdf-result"
+                url = f"{base}/analysis/order/{order_id}/signed-pdf-result"
             else:
-                url = f"{self.base_url}/analysis/order/{order_id}/pdf-result"
+                url = f"{base}/analysis/order/{order_id}/pdf-result"
 
             with open(pdf_path, 'rb') as f:
                 response = await auth_request(method="POST", url=url, files={'file': f}, timeout=120.0)
@@ -363,17 +381,24 @@ class PlatformClient:
             return NotificationResult(status=NotificationStatus.FAILED, message=str(e))
 
     async def upload_all_outputs(
-        self, order_id: str, service_code: str, output_files: List[OutputFile]
+        self, order_id: str, service_code: str, output_files: List[OutputFile],
+        callback_url: Optional[str] = None,
     ) -> Dict[str, NotificationResult]:
         results = {}
         for of in output_files:
             ft = of.file_type.lower()
             if ft in ("tar", "output_tar"):
-                results[of.file_type] = await self.upload_analysis_file(order_id, of.file_path)
+                results[of.file_type] = await self.upload_analysis_file(
+                    order_id, of.file_path, callback_url=callback_url
+                )
             elif ft == "pdf":
-                results[of.file_type] = await self.upload_pdf_report(order_id, of.file_path)
+                results[of.file_type] = await self.upload_pdf_report(
+                    order_id, of.file_path, callback_url=callback_url
+                )
             elif ft == "signed_pdf":
-                results[of.file_type] = await self.upload_pdf_report(order_id, of.file_path, signed=True)
+                results[of.file_type] = await self.upload_pdf_report(
+                    order_id, of.file_path, signed=True, callback_url=callback_url
+                )
             else:
                 logger.debug(f"Skipping upload for file_type: {of.file_type}")
         return results

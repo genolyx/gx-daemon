@@ -200,6 +200,10 @@ class OrderSubmitRequest(BaseModel):
     fastq_r1_path: Optional[str] = Field(default=None)
     fastq_r2_path: Optional[str] = Field(default=None)
     params: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    callback_url: Optional[str] = Field(
+        default=None,
+        description="결과 통보를 받을 Portal URL. 미설정 시 PLATFORM_API_BASE 사용 (Gx-Portal 기본값).",
+    )
 
 
 class OrderStatusResponse(BaseModel):
@@ -328,6 +332,10 @@ class Job(BaseModel):
     fastq_r1_path: Optional[str] = None
     fastq_r2_path: Optional[str] = None
     params: Dict[str, Any] = Field(default_factory=dict)
+    # Per-order callback URL for multi-portal support.
+    # When set, result notifications go to this URL instead of settings.platform_api_base.
+    # Omit (or set None) to use the global PLATFORM_API_BASE (backward-compatible).
+    callback_url: Optional[str] = None
     status: OrderStatus = OrderStatus.RECEIVED
     progress: int = 0
     message: str = ""

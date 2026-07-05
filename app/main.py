@@ -259,6 +259,7 @@ def _pipeline_folder_label(order_id: str, sample_name: Optional[str]) -> str:
 def _build_job_from_submit_request(service_code: str, request) -> Job:
     work_dir = (request.work_dir or "").strip() or now_kst_date_compact()
     folder = _pipeline_folder_label(request.order_id, request.sample_name)
+    callback_url = getattr(request, "callback_url", None) or None
     if service_code == "sgnipt":
         root = getattr(settings, "sgnipt_job_root", settings.base_dir)
         oid = (request.order_id or "").strip()
@@ -268,6 +269,7 @@ def _build_job_from_submit_request(service_code: str, request) -> Job:
             fastq_r1_url=request.fastq_r1_url, fastq_r2_url=request.fastq_r2_url,
             fastq_r1_path=request.fastq_r1_path, fastq_r2_path=request.fastq_r2_path,
             params=request.params or {},
+            callback_url=callback_url,
             fastq_dir=os.path.join(root, "fastq", work_dir, oid),
             analysis_dir=os.path.join(root, "analysis", work_dir, oid),
             output_dir=os.path.join(root, "output", work_dir, oid),
@@ -281,6 +283,7 @@ def _build_job_from_submit_request(service_code: str, request) -> Job:
             fastq_r1_url=request.fastq_r1_url, fastq_r2_url=request.fastq_r2_url,
             fastq_r1_path=request.fastq_r1_path, fastq_r2_path=request.fastq_r2_path,
             params=request.params or {},
+            callback_url=callback_url,
             fastq_dir=os.path.join(work_root, "fastq", work_dir, folder),
             analysis_dir=os.path.join(work_root, "analysis", work_dir, folder),
             output_dir=os.path.join(work_root, "output", work_dir, folder),
@@ -293,6 +296,7 @@ def _build_job_from_submit_request(service_code: str, request) -> Job:
         fastq_r1_url=request.fastq_r1_url, fastq_r2_url=request.fastq_r2_url,
         fastq_r1_path=request.fastq_r1_path, fastq_r2_path=request.fastq_r2_path,
         params=request.params or {},
+        callback_url=callback_url,
         fastq_dir=os.path.join(base, "fastq", work_dir, folder),
         analysis_dir=os.path.join(base, "analysis", work_dir, folder),
         output_dir=os.path.join(base, "output", work_dir, folder),
@@ -1434,6 +1438,7 @@ async def save_order(service_code: str, req: OrderSubmitRequest = Body(...)):
         fastq_r1_path=req.fastq_r1_path,
         fastq_r2_path=req.fastq_r2_path,
         params=req.params or {},
+        callback_url=req.callback_url or None,
     )
     await qm.save_job(job)
     return OrderSaveResponse(
@@ -1496,6 +1501,7 @@ async def submit_order(service_code: str, req: OrderSubmitRequest = Body(...)):
         fastq_r1_path=req.fastq_r1_path,
         fastq_r2_path=req.fastq_r2_path,
         params=req.params or {},
+        callback_url=req.callback_url or None,
     )
     queue_position = await qm.enqueue(job)
     return OrderSubmitResponse(

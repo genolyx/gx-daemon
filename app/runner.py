@@ -141,13 +141,13 @@ class PipelineRunner:
                         continue
                     job = get_task.result()
 
-                # 실행 슬롯 획득
-                await self._queue_manager.acquire_slot()
+                # 서비스 그룹별 슬롯 획득
+                await self._queue_manager.acquire_slot(job.service_code)
 
                 try:
                     await self._execute_job(job, worker_id)
                 finally:
-                    self._queue_manager.release_slot()
+                    self._queue_manager.release_slot(job.service_code)
 
             except asyncio.CancelledError:
                 break
@@ -175,7 +175,8 @@ class PipelineRunner:
             logger.error(error_msg)
             await self._queue_manager.mark_failed(job, error_msg)
             await self._platform_client.notify_analysis_failed(
-                job.order_id, job.service_code, error_msg
+                job.order_id, job.service_code, error_msg,
+                callback_url=job.callback_url,
             )
             schedule_order_telegram("failed", job)
             return
@@ -288,7 +289,8 @@ class PipelineRunner:
 
             if output_files:
                 upload_results = await self._platform_client.upload_all_outputs(
-                    job.order_id, job.service_code, output_files
+                    job.order_id, job.service_code, output_files,
+                    callback_url=job.callback_url,
                 )
                 
                 # 업로드 실패 확인
@@ -304,7 +306,8 @@ class PipelineRunner:
             # ── Step 6: 완료 알림 ──
             await self._update_status(job, OrderStatus.COMPLETED, 100, "Analysis completed")
             await self._platform_client.notify_analysis_result(
-                job.order_id, job.service_code, success=True
+                job.order_id, job.service_code, success=True,
+                callback_url=job.callback_url,
             )
             await self._queue_manager.mark_completed(job)
             schedule_order_telegram("completed", job)
@@ -330,7 +333,8 @@ class PipelineRunner:
                 )
                 await self._queue_manager.mark_failed(job, error_msg)
                 await self._platform_client.notify_analysis_failed(
-                    job.order_id, job.service_code, error_msg
+                    job.order_id, job.service_code, error_msg,
+                    callback_url=job.callback_url,
                 )
                 schedule_order_telegram("failed", job)
                 await plugin.on_job_failed(job, error_msg)
@@ -525,7 +529,8 @@ class PipelineRunner:
         try:
             await self._platform_client.update_order_status(
                 job.order_id, job.service_code,
-                status.value, progress, message
+                status.value, progress, message,
+                callback_url=job.callback_url,
             )
         except Exception as e:
             logger.warning(

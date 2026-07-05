@@ -6,13 +6,34 @@ Queue Manager
 """
 
 import asyncio
+import itertools
 import logging
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Union
 from collections import defaultdict
 
 from .config import settings
 from .datetime_kst import now_kst_iso
 from .models import Job, OrderStatus, QueueSummary
+
+# Service → resource group mapping.
+# "exome" group is the heavy one (carrier_screening / whole_exome / health_screening).
+_SERVICE_GROUP: dict[str, str] = {
+    "nipt": "nipt",
+    "carrier_screening": "exome",
+    "whole_exome": "exome",
+    "health_screening": "exome",
+    "sgnipt": "sgnipt",
+}
+
+# Dequeue priority when NIPT_PRIORITY=true (lower = dequeued first).
+# NIPT runs first; sgnipt before heavy exome.
+_SERVICE_DEQUEUE_PRIORITY: dict[str, int] = {
+    "nipt": 0,
+    "sgnipt": 1,
+    "carrier_screening": 2,
+    "whole_exome": 2,
+    "health_screening": 2,
+}
 from .order_store import (
     OrderStore,
     ACTIVE_BEFORE_RESTART,
@@ -39,9 +60,36 @@ class QueueManager:
     """
 
     def __init__(self, max_concurrent: int = None, store: Optional[OrderStore] = None):
-        self._max_concurrent = max_concurrent or settings.max_concurrent_jobs
-        self._queue: asyncio.Queue = asyncio.Queue()
-        self._semaphore = asyncio.Semaphore(self._max_concurrent)
+        # Per-group semaphores replace the legacy single semaphore.
+        # max_concurrent is kept for backward-compat (test injection); ignored when using groups.
+        self._nipt_priority: bool = settings.nipt_priority
+        nipt_limit = (
+            settings.max_concurrent_nipt_priority
+            if self._nipt_priority
+            else settings.max_concurrent_nipt
+        )
+        self._group_limits: Dict[str, int] = {
+            "nipt":   nipt_limit,
+            "exome":  settings.max_concurrent_exome,
+            "sgnipt": settings.max_concurrent_sgnipt,
+        }
+        # Total worker count = sum of all group limits so every slot can be filled.
+        self._max_concurrent = max_concurrent or sum(self._group_limits.values())
+
+        # Priority mode: use PriorityQueue so NIPT jobs are dequeued before exome.
+        # Normal mode: plain FIFO Queue.
+        self._seq = itertools.count()  # tie-breaker to preserve arrival order within same priority
+        if self._nipt_priority:
+            self._queue: Union[asyncio.Queue, asyncio.PriorityQueue] = asyncio.PriorityQueue()
+        else:
+            self._queue = asyncio.Queue()
+
+        self._group_semaphores: Dict[str, asyncio.Semaphore] = {
+            group: asyncio.Semaphore(limit)
+            for group, limit in self._group_limits.items()
+        }
+        # Fallback semaphore for unknown service codes (uses global limit).
+        self._fallback_semaphore = asyncio.Semaphore(self._max_concurrent)
         self._store = store
 
         # 작업 상태 추적
@@ -60,8 +108,11 @@ class QueueManager:
         if self._store:
             self._restore_from_store()
         logger.info(
-            f"QueueManager initialized (max_concurrent={self._max_concurrent}, "
-            f"store={'on' if self._store else 'off'})"
+            "QueueManager initialized (workers=%d, limits=%s, nipt_priority=%s, store=%s)",
+            self._max_concurrent,
+            self._group_limits,
+            self._nipt_priority,
+            "on" if self._store else "off",
         )
 
     @property
@@ -206,11 +257,18 @@ class QueueManager:
         """
         작업을 큐에 추가합니다.
 
+        이미 QUEUED 또는 RUNNING 상태인 동일 order_id는 거부합니다.
+        --fresh 실행 도중 같은 작업이 삭제 후 재투입되면 실행 중인 work 디렉토리가
+        날아가는 것을 방지합니다.
+
         Args:
             job: 작업 정보
 
         Returns:
             현재 큐 위치 (1-based)
+
+        Raises:
+            ValueError: 동일 order_id가 이미 활성 상태일 때
         """
         if job.service_code in _CARRIER_LIKE:
             apply_carrier_layout_directories(job)
@@ -219,12 +277,26 @@ class QueueManager:
         elif job.service_code == "nipt":
             apply_nipt_layout_directories(job)
         async with self._lock:
+            if job.order_id in self._running_jobs:
+                raise ValueError(
+                    f"Order {job.order_id!r} is already RUNNING — "
+                    "stop it first before re-submitting"
+                )
+            if job.order_id in self._jobs:
+                raise ValueError(
+                    f"Order {job.order_id!r} is already QUEUED — "
+                    "cancel it first before re-submitting"
+                )
             job.status = OrderStatus.QUEUED
             job.updated_at = now_kst_iso()
             self._jobs[job.order_id] = job
             self._stats[job.service_code]["queued"] += 1
 
-        await self._queue.put(job)
+        if self._nipt_priority:
+            priority = _SERVICE_DEQUEUE_PRIORITY.get(job.service_code, 2)
+            await self._queue.put((priority, next(self._seq), job))
+        else:
+            await self._queue.put(job)
         queue_size = self._queue.qsize()
 
         logger.info(
@@ -235,9 +307,17 @@ class QueueManager:
         return queue_size
 
     async def dequeue(self) -> Job:
-        """큐에서 다음 작업을 가져옵니다 (blocking). 취소 요청된 작업은 건너뜁니다."""
+        """큐에서 다음 작업을 가져옵니다 (blocking). 취소 요청된 작업은 건너뜁니다.
+
+        Priority mode (NIPT_PRIORITY=true) 시 PriorityQueue에서 (priority, seq, job) 튜플로
+        반환되므로 job을 언패킹합니다.
+        """
         while True:
-            job = await self._queue.get()
+            raw = await self._queue.get()
+            if self._nipt_priority:
+                _priority, _seq, job = raw
+            else:
+                job = raw
 
             async with self._lock:
                 if job.order_id in self._cancel_requested:
@@ -265,20 +345,30 @@ class QueueManager:
             await self.persist_job(job)
             return job
 
-    async def acquire_slot(self):
-        """실행 슬롯 획득 (동시 실행 수 제한)"""
-        await self._semaphore.acquire()
+    def _semaphore_for(self, service_code: str) -> asyncio.Semaphore:
+        group = _SERVICE_GROUP.get(service_code, "")
+        return self._group_semaphores.get(group, self._fallback_semaphore)
+
+    async def acquire_slot(self, service_code: str = ""):
+        """서비스 그룹별 실행 슬롯 획득 (동시 실행 수 제한)"""
+        sem = self._semaphore_for(service_code)
+        await sem.acquire()
+        group = _SERVICE_GROUP.get(service_code, "unknown")
+        limit = self._group_limits.get(group, self._max_concurrent)
         logger.debug(
-            f"Acquired execution slot "
-            f"(available: {self._semaphore._value}/{self._max_concurrent})"
+            "Acquired slot [%s/%s] (available: %d/%d)",
+            service_code, group, sem._value, limit,
         )
 
-    def release_slot(self):
-        """실행 슬롯 반환"""
-        self._semaphore.release()
+    def release_slot(self, service_code: str = ""):
+        """서비스 그룹별 실행 슬롯 반환"""
+        sem = self._semaphore_for(service_code)
+        sem.release()
+        group = _SERVICE_GROUP.get(service_code, "unknown")
+        limit = self._group_limits.get(group, self._max_concurrent)
         logger.debug(
-            f"Released execution slot "
-            f"(available: {self._semaphore._value}/{self._max_concurrent})"
+            "Released slot [%s/%s] (available: %d/%d)",
+            service_code, group, sem._value, limit,
         )
 
     async def mark_running(self, job: Job):
@@ -904,8 +994,8 @@ class QueueManager:
 
     @property
     def available_slots(self) -> int:
-        """사용 가능한 실행 슬롯 수"""
-        return self._semaphore._value
+        """사용 가능한 실행 슬롯 수 (모든 서비스 그룹의 잔여 슬롯 합계)"""
+        return sum(s._value for s in self._group_semaphores.values())
 
     @property
     def max_concurrent(self) -> int:

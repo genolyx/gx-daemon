@@ -64,8 +64,28 @@ class Settings(BaseSettings):
     telegram_notify_enabled: bool = Field(default=True)
 
     # ─── Queue / Worker ────────────────────────────────────
-    max_concurrent_jobs: int = Field(default=2)
+    # Legacy global limit — kept for backward compat but per-group limits below take precedence.
+    max_concurrent_jobs: int = Field(default=8)
     queue_poll_interval: int = Field(default=30)
+
+    # Per-service-group concurrency limits.
+    # NIPT is lightweight (small FASTQ, ~30 min); exome-based services are CPU/RAM heavy.
+    #   nipt              : gx-nipt
+    #   exome             : carrier_screening, whole_exome, health_screening
+    #   sgnipt            : sgNIPT (single-gene NIPT, exome-scale but lighter than carrier WES)
+    # Total workers = sum of all groups; set each to match your server spec.
+    max_concurrent_nipt: int = Field(default=4)
+    max_concurrent_exome: int = Field(default=2)
+    max_concurrent_sgnipt: int = Field(default=1)
+
+    # NIPT Priority mode.
+    # When true:
+    #   - Uses PriorityQueue so NIPT jobs are always dequeued before exome/sgnipt.
+    #   - NIPT concurrent limit switches to max_concurrent_nipt_priority (higher).
+    #   - Exome/sgnipt jobs wait in queue until no NIPT jobs are pending.
+    # When false: plain FIFO queue with equal per-group limits (balanced mode).
+    nipt_priority: bool = Field(default=False)
+    max_concurrent_nipt_priority: int = Field(default=8)
 
     # ─── Base Directories ──────────────────────────────────
     base_dir: str = Field(default="/data")
