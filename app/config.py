@@ -273,6 +273,7 @@ class Settings(BaseSettings):
     # --gxcnv-reference to the wrapper.
     nipt_gxcnv_model: Optional[str] = Field(default=None)
     nipt_run_wcx: bool = Field(default=True, description="Run WisecondorX inside gx-nipt")
+    nipt_run_wc: bool = Field(default=True, description="Run legacy Wisecondor (WC) inside gx-nipt")
     nipt_report_engine: str = Field(
         default="pptx",
         description="NIPT report engine: 'pptx' (legacy PPTX→PDF) or 'html' (Jinja2 HTML→WeasyPrint PDF)",

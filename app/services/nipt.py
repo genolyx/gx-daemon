@@ -272,6 +272,8 @@ class NIPTPlugin(ServicePlugin):
             parts.extend(["--gxcnv-reference", str(gxcnv_ref)])
         if params.get("run_wcx") is False or getattr(settings, "nipt_run_wcx", True) is False:
             parts.append("--no-wcx")
+        if params.get("run_wc") is False or getattr(settings, "nipt_run_wc", True) is False:
+            parts.append("--no-wc")
 
         # Nextflow binary override
         nf_bin = getattr(settings, "nextflow_executable", None)
