@@ -8,7 +8,7 @@ Queue Manager
 import asyncio
 import itertools
 import logging
-from typing import Dict, List, Optional, Set, Union
+from typing import Dict, List, Optional, Set
 from collections import defaultdict
 
 from .config import settings
@@ -79,10 +79,10 @@ class QueueManager:
         # Priority mode: use PriorityQueue so NIPT jobs are dequeued before exome.
         # Normal mode: plain FIFO Queue.
         self._seq = itertools.count()  # tie-breaker to preserve arrival order within same priority
-        if self._nipt_priority:
-            self._queue: Union[asyncio.Queue, asyncio.PriorityQueue] = asyncio.PriorityQueue()
-        else:
-            self._queue = asyncio.Queue()
+        # Always use PriorityQueue internally. Items are always (priority, seq, job) tuples.
+        # When nipt_priority=false all services get priority=1 → pure FIFO by seq.
+        # When nipt_priority=true use _SERVICE_DEQUEUE_PRIORITY (nipt=0, sgnipt=1, exome=2).
+        self._queue: asyncio.PriorityQueue = asyncio.PriorityQueue()
 
         self._group_semaphores: Dict[str, asyncio.Semaphore] = {
             group: asyncio.Semaphore(limit)
@@ -292,11 +292,13 @@ class QueueManager:
             self._jobs[job.order_id] = job
             self._stats[job.service_code]["queued"] += 1
 
-        if self._nipt_priority:
-            priority = _SERVICE_DEQUEUE_PRIORITY.get(job.service_code, 2)
-            await self._queue.put((priority, next(self._seq), job))
-        else:
-            await self._queue.put(job)
+        # priority=0 is highest. When NIPT_PRIORITY=false all services get priority=1 (FIFO).
+        priority = (
+            _SERVICE_DEQUEUE_PRIORITY.get(job.service_code, 1)
+            if self._nipt_priority
+            else 1
+        )
+        await self._queue.put((priority, next(self._seq), job))
         queue_size = self._queue.qsize()
 
         logger.info(
@@ -314,10 +316,7 @@ class QueueManager:
         """
         while True:
             raw = await self._queue.get()
-            if self._nipt_priority:
-                _priority, _seq, job = raw
-            else:
-                job = raw
+            _priority, _seq, job = raw  # always (priority, seq, job) tuple
 
             async with self._lock:
                 if job.order_id in self._cancel_requested:
@@ -996,6 +995,54 @@ class QueueManager:
     def available_slots(self) -> int:
         """사용 가능한 실행 슬롯 수 (모든 서비스 그룹의 잔여 슬롯 합계)"""
         return sum(s._value for s in self._group_semaphores.values())
+
+    @property
+    def group_slot_status(self) -> Dict[str, Dict]:
+        """서비스 그룹별 슬롯 현황 (limit / running / available / queued).
+
+        /health 및 /queue/status 엔드포인트에서 사용.
+        """
+        queued_by_group: Dict[str, int] = defaultdict(int)
+        for job in self._jobs.values():
+            if job.status == OrderStatus.QUEUED:
+                g = _SERVICE_GROUP.get(job.service_code, "unknown")
+                queued_by_group[g] += 1
+
+        result: Dict[str, Dict] = {}
+        for group, sem in self._group_semaphores.items():
+            limit = self._group_limits[group]
+            running = limit - sem._value
+            result[group] = {
+                "limit": limit,
+                "running": max(0, running),
+                "available": max(0, sem._value),
+                "queued": queued_by_group.get(group, 0),
+            }
+        return result
+
+    def toggle_priority(self, enabled: bool) -> None:
+        """NIPT 우선순위 모드 런타임 전환 (재시작 불필요).
+
+        이미 큐에 있는 작업은 enqueue 당시의 우선순위로 유지되므로
+        전환 직후 몇 개의 잡은 이전 모드의 순서로 처리될 수 있습니다.
+        새로 들어오는 잡부터 새 우선순위가 적용됩니다.
+
+        NIPT 우선순위 슬롯 한도도 함께 전환됩니다:
+          enabled=True  → max_concurrent_nipt_priority
+          enabled=False → max_concurrent_nipt
+        """
+        from .config import settings as s
+        new_nipt_limit = (
+            s.max_concurrent_nipt_priority if enabled else s.max_concurrent_nipt
+        )
+        self._nipt_priority = enabled
+        self._group_limits["nipt"] = new_nipt_limit
+        self._group_semaphores["nipt"] = asyncio.Semaphore(new_nipt_limit)
+        logger.info(
+            "NIPT priority toggled → %s (nipt_limit=%d)",
+            "ON" if enabled else "OFF",
+            new_nipt_limit,
+        )
 
     @property
     def max_concurrent(self) -> int:

@@ -1193,7 +1193,51 @@ async def health():
         "running": len(qm._running_jobs),
         "max_concurrent": qm.max_concurrent,
         "available_slots": qm.available_slots,
+        "nipt_priority": qm._nipt_priority,
+        "slots": qm.group_slot_status,
         "registered_services": list_service_codes(),
+    }
+
+
+# ── Queue Priority Configuration ───────────────────────────────────────────────
+
+@app.get("/config/priority")
+async def get_priority_config():
+    """현재 NIPT 우선순위 모드와 그룹별 슬롯 설정 조회."""
+    qm = get_queue_manager()
+    return {
+        "nipt_priority": qm._nipt_priority,
+        "slots": qm.group_slot_status,
+        "note": (
+            "PATCH /config/priority with {\"nipt_priority\": true|false} to toggle at runtime. "
+            "Already-queued jobs keep their current priority; new jobs use the updated setting."
+        ),
+    }
+
+
+@app.patch("/config/priority")
+async def patch_priority_config(request: Request):
+    """NIPT 우선순위 모드 런타임 전환 (재시작 불필요).
+
+    Body: {"nipt_priority": true | false}
+
+    - true : NIPT 잡을 exome/sgnipt보다 먼저 처리 (PriorityQueue 활성화).
+             동시 NIPT 실행 수가 MAX_CONCURRENT_NIPT_PRIORITY로 확장됨.
+    - false: 모든 서비스 FIFO 동등 처리. 각 그룹 한도 유지.
+
+    .env의 NIPT_PRIORITY는 daemon 기동 시 초기값으로만 사용되며,
+    이 API로 변경한 값은 재시작 전까지 유효합니다.
+    """
+    body = await request.json()
+    enabled = body.get("nipt_priority")
+    if not isinstance(enabled, bool):
+        raise HTTPException(400, "Body must be {\"nipt_priority\": true | false}")
+    qm = get_queue_manager()
+    qm.toggle_priority(enabled)
+    return {
+        "nipt_priority": qm._nipt_priority,
+        "slots": qm.group_slot_status,
+        "message": f"NIPT priority {'enabled' if enabled else 'disabled'} (runtime; restart to persist)",
     }
 
 
@@ -2516,6 +2560,8 @@ async def queue_status():
         "running": {j.order_id: j.model_dump(mode="json") for j in qm._running_jobs.values()},
         "max_concurrent": qm.max_concurrent,
         "available_slots": qm.available_slots,
+        "nipt_priority": qm._nipt_priority,
+        "slots": qm.group_slot_status,
     }
 
 
