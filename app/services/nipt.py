@@ -230,6 +230,8 @@ class NIPTPlugin(ServicePlugin):
             parts.append("--algorithm-only")
         if params.get("_pipeline_fresh"):
             parts.append("--fresh")
+        if params.get("_pipeline_no_resume") or settings.nipt_no_resume:
+            parts.append("--no-resume")
         if params.get("_force"):
             parts.append("--force")
 

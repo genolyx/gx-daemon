@@ -307,6 +307,7 @@ class Settings(BaseSettings):
     nipt_run_gxcnv: bool = Field(default=True, description="Legacy gx-cnv on/off (--no-gxcnv)")
     nipt_run_gxcnv1: Optional[bool] = Field(default=None, description="gxcnv1 on/off")
     nipt_run_gxcnv2: Optional[bool] = Field(default=None, description="gxcnv2 on/off")
+    nipt_no_resume: bool = Field(default=False, description="Force --no-resume for all NIPT jobs (temporary, for fresh re-run testing)")
     nipt_report_engine: str = Field(
         default="pptx",
         description="NIPT report engine: 'pptx' (legacy PPTX→PDF) or 'html' (Jinja2 HTML→WeasyPrint PDF)",
