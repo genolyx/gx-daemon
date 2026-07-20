@@ -305,9 +305,22 @@ class PipelineRunner:
 
             # ── Step 6: 완료 알림 ──
             await self._update_status(job, OrderStatus.COMPLETED, 100, "Analysis completed")
+
+            # 결과 JSON 읽기 (Portal이 full result data를 기대)
+            result_data = None
+            result_json_path = os.path.join(job.output_dir or "", f"{job.order_id}.json")
+            if os.path.isfile(result_json_path):
+                try:
+                    import json as _json
+                    with open(result_json_path, "r", encoding="utf-8") as _f:
+                        result_data = _json.load(_f)
+                except Exception as _e:
+                    logger.warning(f"[{job.service_code}] Could not read result JSON {result_json_path}: {_e}")
+
             await self._platform_client.notify_analysis_result(
                 job.order_id, job.service_code, success=True,
                 callback_url=job.callback_url,
+                result_data=result_data,
             )
             await self._queue_manager.mark_completed(job)
             schedule_order_telegram("completed", job)

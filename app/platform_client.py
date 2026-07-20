@@ -7,6 +7,7 @@ Merges:
 """
 
 import os
+import re
 import json
 import logging
 from typing import Optional, Dict, Any, List, Tuple
@@ -33,6 +34,22 @@ async def get_order_detail(order_id: str) -> OrderDetailResponse:
     resp = await auth_request("GET", url)
     resp.raise_for_status()
     data = resp.json()["data"]
+
+    # gx-daemon Portal API는 임상 정보를 serviceData 하위에 중첩
+    # serviceData 필드를 최상위로 flat merge (top-level 값이 없을 때만 채움)
+    service_data = data.get("serviceData") or {}
+    if service_data:
+        for k, v in service_data.items():
+            if k not in data or data[k] is None:
+                data[k] = v
+
+    if settings.debug_http:
+        import json as _json
+        logger.debug(
+            "get_order_detail merged for %s:\n%s",
+            order_id,
+            _json.dumps(data, ensure_ascii=False, indent=2),
+        )
     return OrderDetailResponse(**data)
 
 
@@ -45,18 +62,25 @@ async def get_order_sequencing_data(order_id: str) -> List[SequencingRecord]:
 
 
 def extract_work_dir(order_id: str) -> str:
-    """order_id에서 work_dir 추출 (GNCI25060001 → 2506)"""
-    if len(order_id) >= 12:
-        if order_id.startswith("GN"):
-            return order_id[4:8]
-        elif order_id.startswith("DGN"):
-            return order_id[5:9]
+    """order_id에서 YYMM work_dir 추출.
+
+    order_id 형식: [Portal prefix][Client ID (2자)][YYMM (4자)][seq (4자)]
+      예) DGGCI26070003 (Dev Portal DGG + CI + 2607 + 0003) → 2607
+          GGCI26070003  (Prod Portal GG + CI + 2607 + 0003)  → 2607
+          GNCI25060001  (GN + CI + 2506 + 0001)              → 2506
+
+    prefix 길이가 가변적이므로 끝 8자리(YYMM+seq) 숫자를 regex로 찾아 앞 4자리 반환.
+    """
+    m = re.search(r'(\d{4})\d{4}$', order_id)
+    if m:
+        return m.group(1)
     return order_id
 
 
-async def download_fastqs(order: FullOrder) -> Tuple[str, str]:
+async def download_fastqs(order: FullOrder, fastq_base: Optional[str] = None) -> Tuple[str, str]:
+    base = fastq_base or settings.fastq_base_dir
     work_dir = extract_work_dir(order.orderId)
-    local_dir = os.path.join(settings.fastq_base_dir, work_dir, order.orderId)
+    local_dir = os.path.join(base, work_dir, order.orderId)
     os.makedirs(local_dir, exist_ok=True)
     local_r1 = await _download_single_fastq(order.r1_id, order.r1_path, local_dir)
     local_r2 = await _download_single_fastq(order.r2_id, order.r2_path, local_dir)
@@ -79,21 +103,54 @@ async def _download_single_fastq(file_id: str, file_path: str, local_dir: str) -
     return local_path
 
 
-async def check_local_fastq_exist(order_id: str, dto: SubmitOrderDto) -> bool:
+def _pick_r1_r2(files: List[str], order_id: str, barcode: str = "") -> Tuple[Optional[str], Optional[str]]:
+    """파일 목록에서 R1/R2 쌍을 찾아 반환.
+
+    우선순위:
+    1. order_id 또는 barcode prefix로 시작하는 파일에서 _R1_ / _R2_ 패턴
+    2. 전체 파일 중 _R1_ / _R2_ 패턴
+    3. sorted 결과의 첫 두 파일 (파일이 정확히 2개일 때)
+    """
+    def is_r1(f: str) -> bool:
+        return bool(re.search(r'[_.]R1[_.]', f) or f.endswith('_R1.fastq.gz'))
+
+    def is_r2(f: str) -> bool:
+        return bool(re.search(r'[_.]R2[_.]', f) or f.endswith('_R2.fastq.gz'))
+
+    candidates = [
+        f for f in files
+        if f.startswith(order_id) or (barcode and f.startswith(barcode))
+    ] or files  # prefix 매칭 없으면 전체 대상
+
+    r1 = next((f for f in candidates if is_r1(f)), None)
+    r2 = next((f for f in candidates if is_r2(f)), None)
+
+    if r1 and r2:
+        return r1, r2
+    # R1/R2 패턴 없이 파일이 2개뿐이면 정렬 순서대로 사용
+    if len(files) == 2:
+        return files[0], files[1]
+    return None, None
+
+
+async def check_local_fastq_exist(
+    order_id: str,
+    dto: SubmitOrderDto,
+    fastq_base: Optional[str] = None,
+    sample_barcode: Optional[str] = None,
+) -> bool:
     try:
+        base = fastq_base or settings.fastq_base_dir
         work_dir = extract_work_dir(order_id)
-        fastq_dir = os.path.join(settings.fastq_base_dir, work_dir, order_id)
+        fastq_dir = os.path.join(base, work_dir, order_id)
         if not os.path.isdir(fastq_dir):
             return False
         files = sorted(f for f in os.listdir(fastq_dir) if f.endswith(".fastq.gz"))
         if len(files) < 2:
             return False
-        sample_barcode = dto.sampleBarcode.strip() if dto.sampleBarcode else ""
-        valid_files = [
-            f for f in files
-            if f.startswith(order_id) or (sample_barcode and f.startswith(sample_barcode))
-        ]
-        return len(valid_files) >= 2
+        barcode = (sample_barcode or "").strip()
+        r1, r2 = _pick_r1_r2(files, order_id, barcode)
+        return r1 is not None and r2 is not None
     except Exception as e:
         logger.warning(f"check_local_fastq_exist error for {order_id}: {e}")
         return False
@@ -124,10 +181,16 @@ async def handle_download_fastq_order(
 
 
 async def handle_local_fastq_order(
-    order_id: str, dto: SubmitOrderDto, patient_age: int, lab_identifiers: List[str]
+    order_id: str,
+    dto: SubmitOrderDto,
+    patient_age: int,
+    lab_identifiers: List[str],
+    fastq_base: Optional[str] = None,
+    sample_barcode: Optional[str] = None,
 ) -> FullOrder:
+    base = fastq_base or settings.fastq_base_dir
     work_dir = extract_work_dir(order_id)
-    fastq_dir = os.path.join(settings.fastq_base_dir, work_dir, order_id)
+    fastq_dir = os.path.join(base, work_dir, order_id)
     if not os.path.isdir(fastq_dir):
         error_msg = f"Local FASTQ directory not found: {fastq_dir}"
         await notify_platform_failure(order_id, error_msg)
@@ -139,18 +202,15 @@ async def handle_local_fastq_order(
         await notify_platform_failure(order_id, "Insufficient sequencing data")
         raise RuntimeError(error_msg)
 
-    sample_barcode = dto.sampleBarcode.strip() if dto.sampleBarcode else None
-    valid_files = [
-        f for f in files
-        if f.startswith(order_id) or (sample_barcode and f.startswith(sample_barcode))
-    ]
-    if len(valid_files) < 2:
-        error_msg = f"Not enough valid FASTQ files ({len(valid_files)} of {len(files)})"
+    barcode = (sample_barcode or "").strip()
+    r1_name, r2_name = _pick_r1_r2(files, order_id, barcode)
+    if not r1_name or not r2_name:
+        error_msg = f"Could not identify R1/R2 FASTQ pair in {fastq_dir} (files: {files})"
         await notify_platform_failure(order_id, "Insufficient sequencing data")
         raise RuntimeError(error_msg)
 
-    r1_path = os.path.join(fastq_dir, valid_files[0])
-    r2_path = os.path.join(fastq_dir, valid_files[1])
+    r1_path = os.path.join(fastq_dir, r1_name)
+    r2_path = os.path.join(fastq_dir, r2_name)
     lab_name = lab_identifiers[0] if lab_identifiers else "default"
 
     return FullOrder(
@@ -166,17 +226,52 @@ async def handle_local_fastq_order(
     )
 
 
-async def fetch_full_order(order_id: str, od: OrderDetailSubmit, dto: SubmitOrderDto) -> FullOrder:
-    patient_age = od.age if od.age is not None else dto.calculate_age()
+def _platform_fastq_base(service_code: str) -> str:
+    """서비스별 Platform FASTQ 다운로드/탐색 기준 디렉토리."""
+    if service_code == "carrier_screening":
+        return settings.carrier_screening_fastq_dir
+    if service_code == "sgnipt":
+        return settings.sgnipt_fastq_root
+    if service_code == "nipt":
+        return settings.nipt_fastq_dir
+    return settings.fastq_base_dir
+
+
+async def fetch_full_order(
+    order_id: str,
+    od: OrderDetailSubmit,
+    dto: SubmitOrderDto,
+    fastq_base: Optional[str] = None,
+) -> FullOrder:
+    """Platform API에서 FASTQ 정보를 가져와 FullOrder 반환.
+
+    fastq_base를 명시하지 않으면 _platform_fastq_base()로 결정한 서비스별 기준 경로를 사용.
+    호출자가 service_code를 알고 있으면 _platform_fastq_base(service_code)를 넘기는 것을 권장.
+    """
+    base = fastq_base or settings.fastq_base_dir
+    # od.age / od.sampleBarcode는 _enqueue_platform_order에서 get_order_detail로 세팅됨
+    patient_age = od.age
     lab_identifiers = od.labIdentifier if od.labIdentifier else dto.labIdentifier
+    sample_barcode = od.sampleBarcode  # SubmitOrderDto에는 없음 → Platform API에서 조회한 값 사용
 
     if dto.is_remotedata_client():
-        if await check_local_fastq_exist(order_id, dto):
-            return await handle_local_fastq_order(order_id, dto, patient_age, lab_identifiers)
+        if await check_local_fastq_exist(order_id, dto, fastq_base=base, sample_barcode=sample_barcode):
+            return await handle_local_fastq_order(
+                order_id, dto, patient_age, lab_identifiers, fastq_base=base, sample_barcode=sample_barcode
+            )
         else:
-            return await handle_download_fastq_order(order_id, dto, patient_age, lab_identifiers)
+            full_order = await handle_download_fastq_order(
+                order_id, dto, patient_age, lab_identifiers
+            )
+            # REMOTE 다운로드 시 서비스별 fastq_base로 저장
+            r1, r2 = await download_fastqs(full_order, fastq_base=base)
+            full_order.r1_path = r1
+            full_order.r2_path = r2
+            return full_order
     elif dto.is_localdata_client():
-        return await handle_local_fastq_order(order_id, dto, patient_age, lab_identifiers)
+        return await handle_local_fastq_order(
+            order_id, dto, patient_age, lab_identifiers, fastq_base=base, sample_barcode=sample_barcode
+        )
     else:
         raise RuntimeError(f"Unknown sequencingDataMethod: {dto.sequencingDataMethod}")
 
@@ -276,20 +371,39 @@ class PlatformClient:
                 status=NotificationStatus.SUCCESS, response_code=response.status_code
             )
         except Exception as e:
-            logger.warning(f"Failed to update platform status for {order_id}: {e}")
-            return NotificationResult(status=NotificationStatus.FAILED, message=str(e))
+            # 404 = Portal이 중간 status 업데이트 엔드포인트를 지원하지 않음 → DEBUG로 낮춤
+            err_str = str(e)
+            level = "debug" if "404" in err_str or "Not Found" in err_str else "warning"
+            getattr(logger, level)(f"update_order_status skipped for {order_id} ({status}): {e}")
+            return NotificationResult(status=NotificationStatus.FAILED, message=err_str)
 
     async def notify_analysis_result(
         self, order_id: str, service_code: str, success: bool = True, log: str = "",
         callback_url: Optional[str] = None,
+        result_data: Optional[Dict[str, Any]] = None,
     ) -> NotificationResult:
         try:
             if not settings.platform_api_enabled:
                 return self._skipped()
             url = f"{self._resolve_base(callback_url)}/analysis/result/{order_id}"
-            payload = {"success": success, "log": log}
-            await auth_request(method="DELETE", url=url, timeout=10.0)
+            # 결과 JSON 전체를 payload에 포함 (Portal이 review 등 필드를 기대)
+            # nipt-daemon과 동일: json_data + success/log 필드 추가
+            if result_data:
+                payload = dict(result_data)
+                payload["success"] = success
+                payload["log"] = log
+            else:
+                payload = {"success": success, "log": log}
+            # 기존 결과 삭제 시도 — 없으면(404) 정상이므로 무시
+            try:
+                await auth_request(method="DELETE", url=url, timeout=10.0)
+            except Exception as del_err:
+                if "404" in str(del_err) or "Not Found" in str(del_err):
+                    logger.debug(f"No existing result to delete for {order_id} (404 is ok)")
+                else:
+                    logger.warning(f"DELETE result for {order_id} failed: {del_err}")
             response = await auth_request(method="POST", url=url, json=payload, timeout=30.0)
+            logger.info(f"notify_analysis_result succeeded for {order_id}: {response.status_code}")
             return NotificationResult(
                 status=NotificationStatus.SUCCESS, response_code=response.status_code
             )

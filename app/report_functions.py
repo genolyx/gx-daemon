@@ -13,6 +13,7 @@ from pptx.dml.color import RGBColor
 from pptx.util import Pt
 
 from .config import settings
+from .models import OrderDetailResponse
 from .platform_client import get_order_detail, get_client_detail, get_client_info, extract_work_dir
 
 logger = logging.getLogger(__name__)
@@ -507,15 +508,28 @@ def extract_report_data(body, show_gender="Yes"):
 
 
 
-async def make_report_json(order_id: str, review_json: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    주문 정보와 리뷰 데이터를 결합하여 리포트용 JSON 생성
+async def make_report_json(
+    order_id: str,
+    review_json: Dict[str, Any],
+    cached_order_detail: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """주문 정보와 리뷰 데이터를 결합하여 리포트용 JSON 생성.
+
+    cached_order_detail: submit 시점에 Platform API에서 가져온 오더 정보 dict.
+                         전달되면 API 재호출 없이 재사용, 없으면 API 호출.
     """
     logger.info(f"Creating report JSON for order: {order_id}")
 
     try:
-        # 1. 주문 상세 정보 조회
-        order = await get_order_detail(order_id)
+        # 1. 주문 상세 정보 — 캐시 우선, 없으면 Platform API 호출
+        if cached_order_detail:
+            try:
+                order = OrderDetailResponse(**cached_order_detail)
+                logger.debug(f"Using cached order detail for {order_id}")
+            except Exception:
+                order = await get_order_detail(order_id)
+        else:
+            order = await get_order_detail(order_id)
         logger.debug(f"Retrieved order details for {order_id}")
         logger.info(order)
 
@@ -1448,16 +1462,19 @@ async def upload_pdf_report(order_id: str, pdf_path: str, *, signed: bool = Fals
         return False
 
 # 메인 워크플로우 함수
-async def generate_and_upload_report(order_id: str, review_json: Dict[str, Any],
-                                   template_dir: str, output_dir: str) -> bool:
-    """
-    전체 리포트 생성 및 업로드 워크플로우
-    """
+async def generate_and_upload_report(
+    order_id: str,
+    review_json: Dict[str, Any],
+    template_dir: str,
+    output_dir: str,
+    cached_order_detail: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """전체 리포트 생성 및 업로드 워크플로우"""
     logger.info(f"Starting report generation workflow for order: {order_id}")
 
     try:
         # 1. 리포트 JSON 생성
-        report_json = await make_report_json(order_id, review_json)
+        report_json = await make_report_json(order_id, review_json, cached_order_detail=cached_order_detail)
 
         logger.info(report_json)
 

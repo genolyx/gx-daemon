@@ -8,7 +8,6 @@ Merges:
 
 from enum import Enum
 from typing import Optional, Dict, Any, List, Literal
-from datetime import datetime, timezone
 from pydantic import BaseModel, Field, Extra, model_validator
 
 from .datetime_kst import now_kst_iso
@@ -51,17 +50,16 @@ class SequencingMethodType(Enum):
 # ─── Platform-facing Models (from nipt-daemon) ─────────────
 
 class SubmitOrderDto(BaseModel):
-    """POST /analysis/order/{order_id}/submit — Platform submit payload"""
-    patientBirthDate: str
-    sequencingDataMethod: str
-    labIdentifier: List[str]
-    type: str
-    sampleBarcode: Optional[str] = None
+    """POST /analysis/{service_code}/order/{order_id}/submit — Platform submit payload.
 
-    def calculate_age(self) -> int:
-        dob = datetime.fromisoformat(self.patientBirthDate.replace("Z", "+00:00"))
-        today = datetime.now(timezone.utc)
-        return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+    모든 서비스 공통 최소 body.
+    - sequencingDataMethod: REMOTE(Platform S3 다운로드) / LOCAL(로컬 디렉토리 탐색)
+    - labIdentifier: Lab별 reference data 선택에 사용 (NIPT 필수, carrier/sgNIPT 무시)
+
+    임상 정보(patientBirth, sampleBarcode 등)는 Platform API GET으로 가져오므로 body 불필요.
+    """
+    sequencingDataMethod: str
+    labIdentifier: List[str] = Field(default_factory=list)
 
     def is_remotedata_client(self) -> bool:
         return self.sequencingDataMethod.lower() == SequencingMethodType.REMOTE.value
@@ -81,17 +79,24 @@ class OrderDetailSubmit(BaseModel):
 
 
 class OrderDetailResponse(BaseModel):
-    """GET /analysis/order/{order_id} response from Platform"""
+    """GET /analysis/order/{order_id} response from Platform.
+
+    gx-daemon Portal API는 임상 정보를 serviceData 하위에 중첩하므로,
+    get_order_detail()에서 serviceData 필드를 최상위로 flat merge 후 파싱.
+    """
     id: str
     clientId: Optional[str] = None
     partnerId: Optional[str] = None
+    hospitalId: Optional[str] = None
+    packageId: Optional[str] = None
+    serviceType: Optional[str] = None
     patientName: Optional[str] = None
     patientBirth: Optional[str] = None
     patientGender: Optional[str] = None
     height: Optional[float] = None
     weight: Optional[float] = None
-    gestationalAgeWeeks: Optional[int] = None
-    gestationalAgeDays: Optional[int] = None
+    gestationalAgeWeeks: Optional[int] = Field(None, alias="gaWeeks")
+    gestationalAgeDays: Optional[int] = Field(None, alias="gaDays")
     pregnancyType: Optional[str] = None
     doctor: Optional[str] = None
     sampleSpecimenType: Optional[str] = None
@@ -112,6 +117,8 @@ class OrderDetailResponse(BaseModel):
     hospital: Optional[Dict[str, Any]] = None
     package: Optional[Dict[str, Any]] = None
     pdf: Optional[Dict[str, Any]] = None
+
+    model_config = {"populate_by_name": True}
 
     def get_template_key(self) -> str:
         return self.templateKey or "Default"
@@ -137,8 +144,8 @@ class FullOrder(BaseModel):
     orderId: str
     clientId: str
     sequencingDataMethod: str
-    lab: str
-    age: int
+    lab: Optional[str] = None
+    age: Optional[int] = None
     r1_id: str
     r2_id: str
     r1_path: str

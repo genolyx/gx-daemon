@@ -40,7 +40,10 @@ services:
       - ${CARRIER_SCREENING_HOST:-/home/ken/gx-exome}:${CARRIER_SCREENING_HOST:-/home/ken/gx-exome}
       - ${BASE_DIR:-/data}/reference:/data/reference:ro
       - ${CARRIER_SCREENING_PIPELINE_DIR:-/opt/pipelines/carrier-screening}:/opt/pipelines/carrier-screening:ro
-      - ${NIPT_PIPELINE_DIR:-/home/ken/gx-nipt}:${NIPT_PIPELINE_DIR:-/home/ken/gx-nipt}:ro
+      - ${NIPT_PIPELINE_DIR:-/home/ken/gx-nipt}:${NIPT_PIPELINE_DIR:-/home/ken/gx-nipt}
+      - ${NIPT_REF_DIR:-/home/ken/gx-nipt/refs}:${NIPT_REF_DIR:-/home/ken/gx-nipt/refs}:ro
+      - /home/ken/ken-nipt/data/refs:/home/ken/ken-nipt/data/refs:ro
+      - ${NIPT_ROOT_DIR:-/home/ken/gx-nipt-data}:${NIPT_ROOT_DIR:-/home/ken/gx-nipt-data}
       - ${SGNIPT_SRC_HOST:-/home/ken/sgnipt}:${SGNIPT_SRC_HOST:-/home/ken/sgnipt}:ro
       - ${SGNIPT_LAYOUT_HOST:-/home/ken/sgNIPT}:${SGNIPT_LAYOUT_HOST:-/home/ken/sgNIPT}
       - ${SGNIPT_LAYOUT_HOST:-/home/ken/sgNIPT}/data:${BASE_DIR:-/data}/sgnipt_work/data:ro

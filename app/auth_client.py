@@ -383,11 +383,60 @@ class AuthClient:
 
         timeout = kwargs.pop("timeout", 10.0)
 
+        # DEBUG_HTTP=true 시 daemon → Platform API 요청/응답 로그
+        # 색상 체계: Portal↔daemon 미들웨어와 동일
+        #   → cyan  : 외부에서 daemon으로 들어오는 방향 (미들웨어가 담당)
+        #   ← green : daemon에서 외부(Portal API)로 나가는 방향 (여기서 담당)
+        #   red     : 4xx/5xx 에러
+        _R   = "\033[0m"
+        _OUT = "\033[1;92m"   # bold green : daemon → Portal API
+        _ERR = "\033[1;91m"   # bold red   : 4xx/5xx
+        if settings.debug_http:
+            body_preview = ""
+            if kwargs.get("json"):
+                import json as _json
+                raw = _json.dumps(kwargs["json"], ensure_ascii=False)
+                body_preview = f"\n{_OUT}  body: {raw[:400]}{_R}"
+            # /status PATCH는 빈번하고 404 가능성 높음 → DEBUG
+            log_fn = logger.debug if url.endswith("/status") else logger.info
+            log_fn("%s← %s %s%s%s", _R + _OUT, method, url, body_preview, _R)
+
         async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.request(method, url, headers=headers, **kwargs)
 
-        if response.status_code >= 400:
-            logger.error(f"[{response.status_code}] Error Response from server: {response.text}")
+        if settings.debug_http:
+            sc = response.status_code
+            color = _ERR if sc >= 400 else _OUT
+            body_text = response.text
+            if sc == 404:
+                # 404는 "엔드포인트 미지원" 가능성 높음 → DEBUG로 조용히
+                preview = body_text[:120] if body_text else ""
+                logger.debug(
+                    "%s→ %s %s %s%s%s",
+                    _R + color, sc, method, url,
+                    f"\n  {preview}" if preview else "", _R,
+                )
+            elif sc >= 400:
+                preview = body_text
+                logger.info(
+                    "%s→ %s %s %s%s%s",
+                    _R + color, sc, method, url,
+                    f"\n  {preview}" if preview else "", _R,
+                )
+            else:
+                # 200 GET: 전체 body, 나머지: 200자
+                preview = body_text if method == "GET" else (body_text[:200] if body_text else "")
+                logger.info(
+                    "%s→ %s %s %s%s%s",
+                    _R + color, sc, method, url,
+                    f"\n  {preview}" if preview else "", _R,
+                )
+        elif response.status_code >= 400:
+            # 404는 "엔드포인트 미지원" 가능성 → DEBUG / 나머지는 ERROR
+            level = "debug" if response.status_code == 404 else "error"
+            getattr(logger, level)(
+                f"[{response.status_code}] Error Response from server: {response.text}"
+            )
 
         # 여기서는 raise_for_status()를 호출하지 않음 (상위에서 처리)
         return response

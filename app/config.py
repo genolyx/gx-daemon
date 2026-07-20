@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     app_env: str = Field(default="dev", description="Environment: dev, staging, prod")
     app_port: int = Field(default=8000, description="API server port")
     log_level: str = Field(default="INFO", description="Logging level")
+    debug_http: bool = Field(default=False, env="DEBUG_HTTP", description="HTTP request/response 상세 로깅")
 
     # ─── Inbound API protection (optional) ─────────────────
     api_key: Optional[str] = Field(default=None)
@@ -57,6 +58,24 @@ class Settings(BaseSettings):
     auth_url: Optional[str] = Field(default=None, description="Authentication endpoint URL")
     api_username: Optional[str] = Field(default=None, description="API login username")
     api_password: Optional[str] = Field(default=None, description="API login password")
+    # Fallback service code for Platform API submissions (/analysis/order/{id}/submit).
+    # Gx-Portal sends type="CLIENT" (patient/order classification, not service type).
+    # Set to the service this Portal instance manages:
+    #   nipt             — Gx-Portal (NIPT 전용, 단계 2~3)
+    #   carrier_screening — Carrier portal
+    platform_submit_default_service: str = Field(
+        default="nipt",
+        description="Default service_code for Platform API submit when type field doesn't match any alias.",
+    )
+    # Custom service code alias overrides (comma-separated key:value).
+    # Maps Portal service codes → internal daemon service_code.
+    # Example: PLATFORM_SERVICE_ALIASES=nipt2:nipt,exome2:carrier_screening
+    # Built-in aliases (nipt/nipt2/gx-nipt→nipt, carrier/exome→carrier_screening, etc.)
+    # are always available; this env var extends/overrides them.
+    platform_service_aliases: str = Field(
+        default="",
+        description="Extra portal code → internal service_code mappings (key:value,key:value).",
+    )
 
     # ─── Telegram ──────────────────────────────────────────
     telegram_bot_token: Optional[str] = Field(default=None)
@@ -274,6 +293,20 @@ class Settings(BaseSettings):
     nipt_gxcnv_model: Optional[str] = Field(default=None)
     nipt_run_wcx: bool = Field(default=True, description="Run WisecondorX inside gx-nipt")
     nipt_run_wc: bool = Field(default=True, description="Run legacy Wisecondor (WC) inside gx-nipt")
+    # Age fallback (Platform DOB 없을 때)
+    nipt_default_age: Optional[int] = Field(
+        default=None,
+        description="Fallback age when Platform API does not return patientBirth (e.g. 30)",
+    )
+    # Pipeline resource knobs — passed through run_nipt.sh → Nextflow
+    nipt_max_cpus: Optional[int] = Field(default=None, description="Nextflow --max_cpus")
+    nipt_samtools_threads: Optional[int] = Field(default=None, description="samtools thread count")
+    nipt_samtools_memory: Optional[str] = Field(default=None, description="e.g. 6G")
+    nipt_picard_memory: Optional[str] = Field(default=None, description="e.g. 12G")
+    # gxcnv knobs
+    nipt_run_gxcnv: bool = Field(default=True, description="Legacy gx-cnv on/off (--no-gxcnv)")
+    nipt_run_gxcnv1: Optional[bool] = Field(default=None, description="gxcnv1 on/off")
+    nipt_run_gxcnv2: Optional[bool] = Field(default=None, description="gxcnv2 on/off")
     nipt_report_engine: str = Field(
         default="pptx",
         description="NIPT report engine: 'pptx' (legacy PPTX→PDF) or 'html' (Jinja2 HTML→WeasyPrint PDF)",

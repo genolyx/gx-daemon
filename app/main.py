@@ -16,6 +16,7 @@ import glob
 import hmac
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
@@ -42,7 +43,8 @@ from .order_store import ingest_report_json_from_disk
 from .annotation_resources import annotation_resource_report
 from .runner import get_runner
 from .platform_client import (
-    get_platform_client, extract_work_dir, fetch_full_order,
+    get_platform_client, extract_work_dir, fetch_full_order, _platform_fastq_base,
+    get_order_detail,
 )
 from .notifier import notify_aws_result, notify_aws_failed, attach_analysis_file, upload_pdf_report
 from .services import load_plugins, get_plugin, list_service_codes, get_all_plugins
@@ -56,6 +58,70 @@ _CARRIER_LIKE = frozenset({"carrier_screening", "whole_exome", "health_screening
 # cluster so they go to the sgnipt plugin.
 _NIPT_TYPES   = frozenset({"NIPT", "nipt"})
 _SGNIPT_TYPES = frozenset({"SGNIPT", "sgnipt", "SG_NIPT", "sg-nipt"})
+
+# ── Platform service code alias table ─────────────────────────────────────────
+# Maps portal service codes / URL segments → internal daemon service_code.
+# Keys are lowercase. Add entries when a Portal uses a non-standard code name.
+# Extendable at runtime via PLATFORM_SERVICE_ALIASES env var:
+#   PLATFORM_SERVICE_ALIASES=nipt2:nipt,exome2:carrier_screening
+_SERVICE_ALIAS_MAP: dict[str, str] = {
+    # NIPT aliases
+    "nipt":             "nipt",
+    "nipt2":            "nipt",
+    "gx-nipt":          "nipt",
+    "gx_nipt":          "nipt",
+    # Carrier / WES aliases
+    "carrier":              "carrier_screening",
+    "carrier_screening":    "carrier_screening",
+    "carrier-screening":    "carrier_screening",
+    "exome":                "carrier_screening",
+    "wes":                  "carrier_screening",
+    "whole_exome":          "whole_exome",
+    "whole-exome":          "whole_exome",
+    "health_screening":     "health_screening",
+    "health-screening":     "health_screening",
+    # sgNIPT aliases
+    "sgnipt":           "sgnipt",
+    "sg-nipt":          "sgnipt",
+    "sg_nipt":          "sgnipt",
+    "sgnipt2":          "sgnipt",
+}
+
+
+def _load_service_aliases() -> None:
+    """Load PLATFORM_SERVICE_ALIASES env var into _SERVICE_ALIAS_MAP at startup.
+
+    Format: comma-separated key:value pairs (case-insensitive keys).
+    Example: PLATFORM_SERVICE_ALIASES=nipt2:nipt,exome2:carrier_screening
+    """
+    raw = (getattr(settings, "platform_service_aliases", None) or "").strip()
+    if not raw:
+        return
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if ":" not in entry:
+            continue
+        portal_code, internal_code = entry.split(":", 1)
+        portal_code = portal_code.strip().lower()
+        internal_code = internal_code.strip()
+        if portal_code and internal_code:
+            _SERVICE_ALIAS_MAP[portal_code] = internal_code
+
+
+def _normalize_platform_service(code: str) -> str:
+    """Normalize a portal service code / URL segment to an internal service_code.
+
+    Lowercases the input, strips hyphens/spaces, then looks up the alias table.
+    Falls back to PLATFORM_SUBMIT_DEFAULT_SERVICE when no alias is found.
+    """
+    key = code.strip().lower()
+    if key in _SERVICE_ALIAS_MAP:
+        return _SERVICE_ALIAS_MAP[key]
+    # Try replacing hyphens/spaces with underscores
+    key_norm = key.replace("-", "_").replace(" ", "_")
+    if key_norm in _SERVICE_ALIAS_MAP:
+        return _SERVICE_ALIAS_MAP[key_norm]
+    return settings.platform_submit_default_service
 
 _RESULT_JSON_CACHE_HEADERS = {
     "Cache-Control": "no-store, no-cache, must-revalidate",
@@ -1060,6 +1126,7 @@ def _dashboard_order_updated_iso(j: Job) -> str:
 async def lifespan(app: FastAPI):
     setup_logging()
     load_plugins(settings.enabled_service_list)
+    _load_service_aliases()
     logger.info("GX-Daemon starting (%s)", settings.app_env)
 
     runner = get_runner()
@@ -1365,43 +1432,66 @@ async def daemon_log(lines: int = Query(default=200, ge=1, le=500)):
 # ══════════════════════════════════════════════════════════════
 
 def _detect_service_code(dto_type: str) -> str:
-    """Detect service_code from the Platform order type field."""
-    t = (dto_type or "").strip()
-    if t in _NIPT_TYPES or t.upper() == "NIPT":
-        return "nipt"
-    if t in _SGNIPT_TYPES or t.upper() in {"SGNIPT", "SG_NIPT", "SG-NIPT"}:
-        return "sgnipt"
-    return "carrier_screening"
+    """Detect service_code from the Platform order type field.
+
+    Gx-Portal sends type="CLIENT" (patient classification, not service type).
+    Routes via alias table first; falls back to PLATFORM_SUBMIT_DEFAULT_SERVICE.
+    """
+    return _normalize_platform_service(dto_type or "")
 
 
 @app.post("/analysis/order/{order_id}/submit")
 async def platform_submit_order(order_id: str, dto: SubmitOrderDto, background: BackgroundTasks):
-    """Platform-originated order submit (nipt-daemon + carrier compatible)."""
-    logger.info(f"Platform submit: {order_id}, type={dto.type}")
+    """Platform submit (하위 호환 endpoint).
+
+    dto.type → alias 테이블 → PLATFORM_SUBMIT_DEFAULT_SERVICE 순으로 service_code 결정.
+    Gx-Portal이 type="CLIENT"를 보낼 때 PLATFORM_SUBMIT_DEFAULT_SERVICE(기본 nipt)로 처리.
+    """
+    service_code = _detect_service_code(dto.type)
+    logger.info(f"Platform submit: {order_id}, type={dto.type!r} → service={service_code}")
+    return await _platform_submit_core(order_id, dto, background, service_code)
+
+
+@app.post("/analysis/{portal_service_code}/order/{order_id}/submit")
+async def platform_submit_order_typed(
+    portal_service_code: str, order_id: str, dto: SubmitOrderDto, background: BackgroundTasks
+):
+    """Service-type-explicit Platform submit (Gx-Portal / service-daemon/portal Platform 모드).
+
+    Portal이 서비스 코드를 URL에 포함해서 전송:
+      POST /analysis/nipt2/order/{id}/submit   → service_code=nipt
+      POST /analysis/carrier/order/{id}/submit → service_code=carrier_screening
+      POST /analysis/sgnipt/order/{id}/submit  → service_code=sgnipt
+
+    dto.type 필드는 무시하고 URL의 portal_service_code를 alias 테이블로 정규화.
+    """
+    service_code = _normalize_platform_service(portal_service_code)
+    logger.info(
+        f"Platform submit (typed): {order_id}, "
+        f"portal_code={portal_service_code!r} → service={service_code}"
+    )
+    return await _platform_submit_core(order_id, dto, background, service_code)
+
+
+async def _platform_submit_core(
+    order_id: str, dto: SubmitOrderDto, background: BackgroundTasks, service_code: str
+):
+    """Shared submit logic used by both typed and legacy endpoints.
+
+    submit body는 최소 필드(sequencingDataMethod, labIdentifier)만 받고,
+    임상 정보(patientBirth, sampleBarcode 등)는 background에서 Platform API GET으로 가져온다.
+    """
     qm = get_queue_manager()
     try:
-        patient_age = dto.calculate_age()
-        od = OrderDetailSubmit(
-            id=order_id,
-            clientId="",
-            patientBirth=dto.patientBirthDate,
-            age=patient_age,
-            labIdentifier=dto.labIdentifier,
-            sampleBarcode=dto.sampleBarcode,
-        )
-
-        service_code = _detect_service_code(dto.type)
         if not get_plugin(service_code):
             raise HTTPException(
                 status_code=400,
                 detail=(
                     f"This daemon ({settings.app_name}) does not support service_code "
-                    f"'{service_code}' (mapped from order type '{dto.type}'). "
-                    f"Registered services: {list_service_codes()}."
+                    f"'{service_code}'. Registered services: {list_service_codes()}."
                 ),
             )
         work_dir = extract_work_dir(order_id)
-
         job = Job(
             order_id=order_id,
             service_code=service_code,
@@ -1409,51 +1499,114 @@ async def platform_submit_order(order_id: str, dto: SubmitOrderDto, background: 
             work_dir=work_dir,
             params={
                 "platform_submit": True,
-                "patient_birth_date": dto.patientBirthDate,
                 "sequencing_data_method": dto.sequencingDataMethod,
                 "lab_identifier": dto.labIdentifier,
-                "sample_barcode": dto.sampleBarcode,
-                "type": dto.type,
-                "patient_age": patient_age,
             },
         )
-
-        if service_code in ("sgnipt", "nipt"):
-            # Both NIPT variants need the Portal FASTQ download dance
-            # before enqueue. Run that asynchronously so the Platform
-            # request returns quickly.
-            background.add_task(_enqueue_nipt_order, qm, order_id, od, dto, job)
-        else:
-            await qm.enqueue(job)
-
+        # 모든 서비스: background에서 Platform API GET → FASTQ fetch → enqueue
+        background.add_task(_enqueue_platform_order, qm, order_id, dto, job)
         return {
             "message": "order received",
             "order_id": order_id,
-            "patient_age": patient_age,
             "lab_identifier": dto.labIdentifier,
-            "sample_barcode": dto.sampleBarcode,
             "status": "queued",
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error processing submit for {order_id}: {e}")
         raise HTTPException(500, f"Internal server error: {str(e)}")
 
 
-async def _enqueue_nipt_order(qm, order_id: str, od, dto, job: Job):
-    """Background task: fetch full order from platform (incl. FASTQ), then enqueue."""
+async def _enqueue_platform_order(qm, order_id: str, dto: SubmitOrderDto, job: Job):
+    """Background task: Platform API GET 후 FASTQ fetch → enqueue (모든 서비스 공통).
+
+    1. GET /analysis/order/{id} → patientBirth, sampleBarcode 등 임상 정보 취득
+    2. NIPT: patientBirth로 age 계산 후 파이프라인 인자에 세팅
+    3. fetch_full_order → REMOTE 다운로드 또는 LOCAL 탐색
+    4. FASTQ 경로를 job에 세팅 후 enqueue
+    """
     try:
-        full_order: FullOrder = await fetch_full_order(order_id, od, dto)
+        # Step 1: Platform API에서 오더 임상 정보 GET (report 생성 시 재사용을 위해 전체 저장)
+        order_detail = None
+        try:
+            order_detail = await get_order_detail(order_id)
+            patient_birth = order_detail.patientBirth
+            sample_barcode = order_detail.sampleBarcode
+            logger.info(
+                f"[{job.service_code}] Order detail fetched for {order_id}: "
+                f"patientBirth={patient_birth}, sampleBarcode={sample_barcode}"
+            )
+        except Exception as e:
+            logger.warning(
+                f"[{job.service_code}] Could not fetch order detail for {order_id}: {e}. "
+                "Continuing without clinical data."
+            )
+            patient_birth = None
+            sample_barcode = None
+
+        # Step 2: age 계산 (NIPT 파이프라인에 필요)
+        patient_age: Optional[int] = None
+        if patient_birth:
+            try:
+                dob = datetime.fromisoformat(patient_birth.replace("Z", "+00:00"))
+                today = datetime.now(timezone.utc)
+                patient_age = today.year - dob.year - (
+                    (today.month, today.day) < (dob.month, dob.day)
+                )
+            except Exception:
+                pass
+
+        # Step 3: OrderDetailSubmit 구성 (fetch_full_order가 사용)
+        od = OrderDetailSubmit(
+            id=order_id,
+            clientId="",
+            patientBirth=patient_birth,
+            age=patient_age,
+            labIdentifier=dto.labIdentifier or [],
+            sampleBarcode=sample_barcode,
+        )
+
+        # job.params에 취득한 임상 정보 보강 (report 생성 시 재사용, API 중복 호출 방지)
+        job.params.update({
+            "patient_birth_date": patient_birth,
+            "patient_age": patient_age,
+            "sample_barcode": sample_barcode,
+            "platform_order_detail": (
+                order_detail.model_dump(mode="json") if order_detail else None
+            ),
+        })
+
+        # Step 4: FASTQ fetch (REMOTE 다운로드 또는 LOCAL 탐색)
+        fastq_base = _platform_fastq_base(job.service_code)
+        full_order: FullOrder = await fetch_full_order(order_id, od, dto, fastq_base=fastq_base)
         job.fastq_r1_path = getattr(full_order, "r1_path", None)
         job.fastq_r2_path = getattr(full_order, "r2_path", None)
         job.params["full_order"] = full_order.model_dump(mode="json")
+
+        # labcode: nipt/carrier/sgnipt 파이프라인이 params["labcode"]를 사용
+        # lab_identifier[0] → full_order.lab 경로로 세팅
+        if full_order.lab and not job.params.get("labcode"):
+            job.params["labcode"] = full_order.lab
+
         await qm.enqueue(job)
-        logger.info(f"NIPT order {order_id} enqueued with FASTQ paths")
+        logger.info(
+            f"[{job.service_code}] Platform order {order_id} enqueued "
+            f"(labcode={job.params.get('labcode')}, age={patient_age}, "
+            f"r1={job.fastq_r1_path}, base={fastq_base})"
+        )
     except Exception as e:
-        logger.error(f"Failed to enqueue NIPT order {order_id}: {e}")
+        logger.error(f"Failed to enqueue platform order {order_id} ({job.service_code}): {e}")
         try:
-            await notify_aws_failed(order_id, str(e))
-        except Exception:
-            pass
+            pc = get_platform_client()
+            await pc.notify_analysis_failed(
+                order_id,
+                job.service_code,
+                str(e),
+                callback_url=job.callback_url,
+            )
+        except Exception as notify_err:
+            logger.warning(f"Could not notify failure for {order_id}: {notify_err}")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2717,7 +2870,13 @@ async def generate_nipt_report(order_id: str, request: Request):
             settings.nipt_output_dir, work_dir, order_id
         )
 
-        report_json = await make_report_json(order_id, body)
+        # submit 시점에 저장된 order detail 재사용 (Platform API 중복 호출 방지)
+        qm = get_queue_manager()
+        cached_job = qm.get_job(order_id)
+        cached_order_detail = (
+            cached_job.params.get("platform_order_detail") if cached_job else None
+        )
+        report_json = await make_report_json(order_id, body, cached_order_detail=cached_order_detail)
 
         os.makedirs(output_dir, exist_ok=True)
         report_json_path = os.path.join(output_dir, f"{order_id}_report.json")

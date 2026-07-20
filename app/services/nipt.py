@@ -216,10 +216,10 @@ class NIPTPlugin(ServicePlugin):
                 "--fastq-r2", os.path.basename(r2),
             ])
 
-        # Patient age comes from the Platform submit DTO
-        age = params.get("patient_age")
+        # Patient age — required by run_nipt.sh; fallback to env default
+        age = params.get("patient_age") or params.get("age")
         if age is None:
-            age = params.get("age")
+            age = getattr(settings, "nipt_default_age", None)
         if age is not None:
             parts.extend(["--age", str(age)])
 
@@ -232,6 +232,23 @@ class NIPTPlugin(ServicePlugin):
             parts.append("--fresh")
         if params.get("_force"):
             parts.append("--force")
+
+        # ── Resource knobs (params override settings) ──────────────
+        max_cpus = params.get("max_cpus") or getattr(settings, "nipt_max_cpus", None)
+        if max_cpus:
+            parts.extend(["--max-cpus", str(max_cpus)])
+
+        samtools_threads = params.get("samtools_threads") or getattr(settings, "nipt_samtools_threads", None)
+        if samtools_threads:
+            parts.extend(["--samtools-threads", str(samtools_threads)])
+
+        samtools_memory = params.get("samtools_memory") or getattr(settings, "nipt_samtools_memory", None)
+        if samtools_memory:
+            parts.extend(["--samtools-memory", str(samtools_memory)])
+
+        picard_memory = params.get("picard_memory") or getattr(settings, "nipt_picard_memory", None)
+        if picard_memory:
+            parts.extend(["--picard-memory", str(picard_memory)])
 
         # SSD scratch
         use_ssd = bool(getattr(settings, "nipt_use_ssd", False))
@@ -270,6 +287,31 @@ class NIPTPlugin(ServicePlugin):
         )
         if gxcnv_ref:
             parts.extend(["--gxcnv-reference", str(gxcnv_ref)])
+
+        # legacy gx-cnv on/off
+        run_gxcnv = params.get("run_gxcnv")
+        if run_gxcnv is None:
+            run_gxcnv = getattr(settings, "nipt_run_gxcnv", True)
+        if not run_gxcnv:
+            parts.append("--no-gxcnv")
+
+        # gxcnv1 / gxcnv2 (params override settings; None = let pipeline decide)
+        run_gxcnv1 = params.get("run_gxcnv1")
+        if run_gxcnv1 is None:
+            run_gxcnv1 = getattr(settings, "nipt_run_gxcnv1", None)
+        if run_gxcnv1 is True:
+            parts.append("--run-gxcnv1")
+        elif run_gxcnv1 is False:
+            parts.append("--no-gxcnv1")
+
+        run_gxcnv2 = params.get("run_gxcnv2")
+        if run_gxcnv2 is None:
+            run_gxcnv2 = getattr(settings, "nipt_run_gxcnv2", None)
+        if run_gxcnv2 is True:
+            parts.append("--run-gxcnv2")
+        elif run_gxcnv2 is False:
+            parts.append("--no-gxcnv2")
+
         if params.get("run_wcx") is False or getattr(settings, "nipt_run_wcx", True) is False:
             parts.append("--no-wcx")
         if params.get("run_wc") is False or getattr(settings, "nipt_run_wc", True) is False:
@@ -284,7 +326,8 @@ class NIPTPlugin(ServicePlugin):
 
     async def get_pipeline_command(self, job: Job) -> str:
         parts = self._cli_parts(job)
-        # labcode validation (command-built above relies on it)
+
+        # labcode 검증
         lab = ""
         for i, tok in enumerate(parts):
             if tok == "--labcode" and i + 1 < len(parts):
@@ -293,6 +336,15 @@ class NIPTPlugin(ServicePlugin):
             raise RuntimeError(
                 "nipt: labcode not set. Provide via Platform DTO or set NIPT_DEFAULT_LABCODE."
             )
+
+        # age 검증 — run_nipt.sh에 --age 없으면 exit 1
+        has_age = "--age" in parts
+        if not has_age:
+            raise RuntimeError(
+                "nipt: --age not set. Platform API did not return patientBirth "
+                "and NIPT_DEFAULT_AGE is not configured in .env."
+            )
+
         return shlex.join(parts)
 
     # ── completion + post-processing ────────────────────────────
@@ -309,6 +361,143 @@ class NIPTPlugin(ServicePlugin):
             return False
         return True
 
+    # ── QC post-processing helpers ───────────────────────────────────
+    def _parse_qc_filter_txt(self, qc_filter_path: str) -> Dict[str, Any]:
+        """Parse Output_QC/<order_id>.qc.filter.txt into sequencing_metrics dict."""
+        metrics: Dict[str, Any] = {}
+        if not os.path.isfile(qc_filter_path):
+            return metrics
+
+        field_map = {
+            "number_of_reads":       ("total_reads",       "reads", ">10M"),
+            "number_of_mapped_reads":("mapped_reads",       "reads", ""),
+            "mapping_rate":          ("mapping_rate",       "%",     ">85%"),
+            "duplication_rate":      ("duplication_rate",   "%",     "<40%"),
+            "gc_content":            ("gc_content",         "%",     "33~55%"),
+        }
+        try:
+            with open(qc_filter_path, encoding="utf-8") as f:
+                for line in f:
+                    parts = line.strip().split("\t")
+                    if len(parts) < 2:
+                        continue
+                    key = parts[0].strip()
+                    if key not in field_map:
+                        continue
+                    out_key, unit, threshold = field_map[key]
+                    try:
+                        value = float(parts[1].strip())
+                    except (ValueError, IndexError):
+                        continue
+                    status = parts[-1].strip() if len(parts) >= 4 else "UNKNOWN"
+                    metrics[out_key] = {
+                        "value": value,
+                        "status": status,
+                        "unit": unit,
+                        "threshold": threshold,
+                    }
+        except OSError as e:
+            logger.warning("[nipt] Could not parse qc.filter.txt: %s", e)
+        return metrics
+
+    def _build_analysis_qc(self, final_results: Dict[str, Any]) -> Dict[str, Any]:
+        """Build analysis_qc section from final_results fields."""
+        aqc: Dict[str, Any] = {}
+
+        ff_yff = final_results.get("fetal_fraction_yff")
+        aqc["fetal_fraction_yff"] = {
+            "value": ff_yff,
+            "unit": "%",
+            "status": "PASS" if ff_yff not in (None, "N/A", "NA") else "N/A",
+            "threshold": ">4.0%",
+        }
+
+        ff_seqff = final_results.get("fetal_fraction_seqff")
+        try:
+            ff_seqff_f = float(ff_seqff) if ff_seqff not in (None, "NA", "N/A") else None
+        except (TypeError, ValueError):
+            ff_seqff_f = None
+        aqc["fetal_fraction_seqff"] = {
+            "value": ff_seqff_f if ff_seqff_f is not None else ff_seqff,
+            "unit": "%",
+            "status": "PASS" if ff_seqff_f is not None and ff_seqff_f >= 4.0 else "FAIL" if ff_seqff_f is not None else "N/A",
+            "threshold": ">4.0%",
+        }
+
+        ff_final = final_results.get("fetal_fraction_ff_final")
+        try:
+            ff_final_f = float(ff_final) if ff_final not in (None, "NA", "N/A") else None
+        except (TypeError, ValueError):
+            ff_final_f = None
+        if ff_final_f is not None:
+            aqc["fetal_fraction_final"] = {
+                "value": ff_final_f,
+                "unit": "%",
+                "status": "PASS" if ff_final_f >= 4.0 else "FAIL",
+                "threshold": ">4.0%",
+            }
+
+        ff_ratio = final_results.get("ff_ratio")
+        try:
+            ff_ratio_f = float(ff_ratio) if ff_ratio not in (None, "NA", "N/A") else None
+        except (TypeError, ValueError):
+            ff_ratio_f = None
+        if ff_ratio_f is not None:
+            aqc["ff_ratio"] = {
+                "value": ff_ratio_f,
+                "unit": "",
+                "status": "PASS" if ff_ratio_f < 2.5 else "FAIL",
+                "threshold": "<2.5",
+            }
+
+        qc_result = final_results.get("QC_result", "")
+        aqc["overall_qc"] = {
+            "value": qc_result,
+            "status": qc_result if qc_result else "UNKNOWN",
+        }
+
+        return aqc
+
+    def _enrich_result_json(self, json_path: str, order_id: str) -> None:
+        """Post-process the pipeline JSON to fill empty QC fields."""
+        try:
+            with open(json_path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning("[nipt] Could not read result JSON for enrichment: %s", e)
+            return
+
+        nipt = data.get("NIPT", {})
+        qc = nipt.get("quality_control", {})
+        final_results = nipt.get("final_results", {})
+
+        changed = False
+
+        # 1. Fill sequencing_metrics from qc.filter.txt if empty
+        if not qc.get("sequencing_metrics"):
+            output_dir = os.path.dirname(json_path)
+            qc_filter = os.path.join(output_dir, "Output_QC", f"{order_id}.qc.filter.txt")
+            metrics = self._parse_qc_filter_txt(qc_filter)
+            if metrics:
+                qc["sequencing_metrics"] = metrics
+                logger.info("[nipt] Filled sequencing_metrics (%d fields) from qc.filter.txt", len(metrics))
+                changed = True
+
+        # 2. Fill analysis_qc from final_results if empty
+        if not qc.get("analysis_qc") and final_results:
+            aqc = self._build_analysis_qc(final_results)
+            if aqc:
+                qc["analysis_qc"] = aqc
+                logger.info("[nipt] Filled analysis_qc (%d fields) from final_results", len(aqc))
+                changed = True
+
+        if changed:
+            nipt["quality_control"] = qc
+            data["NIPT"] = nipt
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            logger.info("[nipt] Result JSON enriched: %s", json_path)
+
     async def process_results(self, job: Job) -> bool:
         """Copy the NIPT result into result.json so Portal review APIs work,
         and ensure the output tar exists.
@@ -319,6 +508,11 @@ class NIPTPlugin(ServicePlugin):
             if not os.path.isfile(src):
                 logger.error("[nipt] Expected result not found: %s", src)
                 return False
+
+            # Post-process: fill empty QC fields from pipeline artifacts
+            order_id = (job.order_id or "").strip()
+            self._enrich_result_json(src, order_id)
+
             if os.path.abspath(src) != os.path.abspath(dst):
                 shutil.copyfile(src, dst)
                 logger.info("[nipt] Published result.json -> %s", dst)
