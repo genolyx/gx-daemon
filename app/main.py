@@ -1518,6 +1518,80 @@ async def _platform_submit_core(
         raise HTTPException(500, f"Internal server error: {str(e)}")
 
 
+def _map_platform_order_to_carrier_params(
+    job: Job, od: "OrderDetailResponse", dto: SubmitOrderDto
+) -> None:
+    """Platform API order_detail → params['carrier'] (carrier/exome/health 공통).
+
+    로컬 Create Order 폼이 채우는 params.carrier 스키마와 동일하게 구성해
+    하위 플러그인(validate_params, get_pipeline_command, report 생성)이 그대로 사용할 수 있게 함.
+    wes_panel_id가 없으면 CARRIER_DEFAULT_WES_PANEL_ID 환경변수 값으로 fallback.
+    """
+    hospital_name = ""
+    if od.hospital and isinstance(od.hospital, dict):
+        hospital_name = od.hospital.get("name", "") or od.hospital.get("hospitalName", "")
+
+    carrier: Dict[str, Any] = {
+        "patient_name":       od.patientName or "",
+        "patient_birth":      od.patientBirth or "",
+        "patient_gender":     od.patientGender or "",
+        "sample_barcode":     od.sampleBarcode or "",
+        "sample_id":          od.sampleId or "",
+        "hospital_name":      hospital_name,
+        "doctor":             od.doctor or "",
+        "medical_record_id":  od.medicalRecordId or "",
+        "report_language":    (od.reportLanguage or ["Korean"]),
+        "sample_collection_date": od.sampleCollectedAt or "",
+        "receipt_date":       od.receiptDate or "",
+        "indication_for_testing": (od.indication or []),
+        "package_code":       od.packageId or "",
+        # wes_panel_id: Platform 주문에 없으면 .env 기본값
+        "wes_panel_id": (getattr(settings, "carrier_default_wes_panel_id", None) or ""),
+        # Platform submit 표시 — validate_params에서 strict 완화에 사용
+        "_platform_submit": True,
+    }
+    # 기존 params.carrier 값이 있으면 유지(로컬 submit 경로와 혼용 방지)
+    if not job.params.get("carrier"):
+        job.params["carrier"] = carrier
+    logger.debug("[%s] Mapped platform order → params.carrier for %s", job.service_code, job.order_id)
+
+
+def _map_platform_order_to_sgnipt_params(job: Job, od: "OrderDetailResponse") -> None:
+    """Platform API order_detail → params['nipt'] (sgNIPT 전용).
+
+    sgNIPT 파이프라인 CLI는 GA/age를 직접 사용하지 않지만,
+    params.nipt는 리포트 생성 시 임상 메타로 사용된다.
+    """
+    hospital_name = ""
+    if od.hospital and isinstance(od.hospital, dict):
+        hospital_name = od.hospital.get("name", "") or od.hospital.get("hospitalName", "")
+
+    nipt: Dict[str, Any] = {
+        "patient_name":           od.patientName or "",
+        "patient_birth":          od.patientBirth or "",
+        "patient_gender":         od.patientGender or "",
+        "sample_barcode":         od.sampleBarcode or "",
+        "sample_id":              od.sampleId or "",
+        "hospital_name":          hospital_name,
+        "doctor":                 od.doctor or "",
+        "medical_record_id":      od.medicalRecordId or "",
+        "gestational_age_weeks":  od.gestationalAgeWeeks,
+        "gestational_age_days":   od.gestationalAgeDays,
+        "pregnancy_type":         od.pregnancyType or "",
+        "height":                 od.height,
+        "weight":                 od.weight,
+        "report_language":        (od.reportLanguage or ["Korean"]),
+        "sample_collection_date": od.sampleCollectedAt or "",
+        "receipt_date":           od.receiptDate or "",
+        "indication_for_testing": (od.indication or []),
+        "package_code":           od.packageId or "",
+        "_platform_submit": True,
+    }
+    if not job.params.get("nipt"):
+        job.params["nipt"] = nipt
+    logger.debug("[sgnipt] Mapped platform order → params.nipt for %s", job.order_id)
+
+
 async def _enqueue_platform_order(qm, order_id: str, dto: SubmitOrderDto, job: Job):
     """Background task: Platform API GET 후 FASTQ fetch → enqueue (모든 서비스 공통).
 
@@ -1576,6 +1650,15 @@ async def _enqueue_platform_order(qm, order_id: str, dto: SubmitOrderDto, job: J
                 order_detail.model_dump(mode="json") if order_detail else None
             ),
         })
+
+        # 서비스별 params 매핑: 각 플러그인이 기대하는 params.carrier / params.nipt 구조로 변환
+        # (로컬 Create Order 폼과 동일 스키마 → 하위 리포트/파이프라인 로직 재사용)
+        if order_detail:
+            sc = job.service_code or ""
+            if sc in _CARRIER_LIKE:
+                _map_platform_order_to_carrier_params(job, order_detail, dto)
+            elif sc == "sgnipt":
+                _map_platform_order_to_sgnipt_params(job, order_detail)
 
         # Step 4: FASTQ fetch (REMOTE 다운로드 또는 LOCAL 탐색)
         fastq_base = _platform_fastq_base(job.service_code)

@@ -419,12 +419,18 @@ class CarrierScreeningPlugin(ServicePlugin):
         # wes_panel_id 는 Submit/Run 단계(strict=True)에서만 필수 — Save(초안) 단계에서는 선택.
         if strict and _carrier_requires_interpretation_panel(params):
             wid = _resolve_carrier_wes_panel_id(params)
-            if not wid:
+            # Platform submit(_platform_submit=True)이면 wes_panel_id 없어도 진행
+            # (CARRIER_DEFAULT_WES_PANEL_ID .env 설정 또는 패널 없이 실행)
+            is_platform = bool((params or {}).get("_platform_submit") or
+                               ((params or {}).get("carrier") or {}).get("_platform_submit"))
+            if not wid and not is_platform:
                 return (
                     False,
                     "wes_panel_id is required: choose a Primary (interpretation) panel. "
                     "The pipeline annotates the full exome/capture; the panel narrows the clinical report.",
                 )
+            if not wid:
+                return True, ""
             from ..wes_panels import get_panel_by_id, resolve_panel_interpretation_genes
 
             panel = get_panel_by_id(wid)
@@ -1232,6 +1238,8 @@ class CarrierScreeningPlugin(ServicePlugin):
             if getattr(settings, "carrier_screening_fresh_append_nf_live_log", True):
                 if "--nf-live-log" not in parts:
                     parts.append("--nf-live-log")
+        elif (job.params or {}).get("_pipeline_no_resume") or getattr(settings, "carrier_no_resume", False):
+            parts.append("--no-resume")
         if (job.params or {}).get("_pipeline_use_ssd"):
             parts.append("--use-ssd")
             sdir = ((job.params or {}).get("_pipeline_scratch_dir") or "").strip()

@@ -145,6 +145,10 @@ class Settings(BaseSettings):
     carrier_capture_panel_bed_dir: Optional[str] = Field(default=None)
     carrier_default_backbone_bed: Optional[str] = Field(default=None)
     carrier_default_disease_bed: Optional[str] = Field(default=None)
+    # Platform submit 시 wes_panel_id가 없을 때 사용할 기본 패널 ID (빈 문자열이면 패널 미사용)
+    carrier_default_wes_panel_id: Optional[str] = Field(default=None)
+    # 임시 플래그: true이면 모든 carrier/exome/health 잡을 --no-resume으로 실행 (테스트용)
+    carrier_no_resume: bool = Field(default=False)
 
     # ─── WES Panels ────────────────────────────────────────
     wes_panels_json: Optional[str] = Field(default=None)
@@ -308,6 +312,13 @@ class Settings(BaseSettings):
     nipt_run_gxcnv1: Optional[bool] = Field(default=None, description="gxcnv1 on/off")
     nipt_run_gxcnv2: Optional[bool] = Field(default=None, description="gxcnv2 on/off")
     nipt_no_resume: bool = Field(default=False, description="Force --no-resume for all NIPT jobs (temporary, for fresh re-run testing)")
+    # sgNIPT
+    sgnipt_no_resume: bool = Field(default=False, description="Force --no-resume for all sgNIPT jobs (temporary)")
+    # Portal callback authentication
+    portal_callback_auth_enabled: bool = Field(default=False, description="Login to portal before sending result callbacks")
+    portal_auth_url: Optional[str] = Field(default=None, description="Portal authentication endpoint URL")
+    portal_auth_username: Optional[str] = Field(default=None, description="Portal auth username")
+    portal_auth_password: Optional[str] = Field(default=None, description="Portal auth password")
     nipt_report_engine: str = Field(
         default="pptx",
         description="NIPT report engine: 'pptx' (legacy PPTX→PDF) or 'html' (Jinja2 HTML→WeasyPrint PDF)",

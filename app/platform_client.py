@@ -228,7 +228,7 @@ async def handle_local_fastq_order(
 
 def _platform_fastq_base(service_code: str) -> str:
     """서비스별 Platform FASTQ 다운로드/탐색 기준 디렉토리."""
-    if service_code == "carrier_screening":
+    if service_code in ("carrier_screening", "whole_exome", "health_screening"):
         return settings.carrier_screening_fastq_dir
     if service_code == "sgnipt":
         return settings.sgnipt_fastq_root

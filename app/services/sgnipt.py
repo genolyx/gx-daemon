@@ -574,7 +574,17 @@ class SgNIPTPlugin(ServicePlugin):
 
         if params.get("_pipeline_fresh"):
             parts.append("--fresh")
+        elif params.get("_pipeline_no_resume") or getattr(settings, "sgnipt_no_resume", False):
+            parts.append("--no-resume")
         return parts
+
+    @staticmethod
+    def _extra_env_for_no_resume(job: Job) -> str:
+        """SGNIPT_NO_RESUME=1 prefix when _pipeline_no_resume or settings.sgnipt_no_resume."""
+        from ..config import settings as _s
+        if (job.params or {}).get("_pipeline_no_resume") or getattr(_s, "sgnipt_no_resume", False):
+            return "SGNIPT_NO_RESUME=1 "
+        return ""
 
     @staticmethod
     def _run_sgnipt_shell_env(job: Job) -> str:
@@ -588,12 +598,15 @@ class SgNIPTPlugin(ServicePlugin):
         gx-exome/fastq), pass SGNIPT_FASTQ_EXTRA_VOLUME so the nested docker run can
         follow those symlinks — mirrors run_analysis.sh INPUT_BAM_MOUNT_ARGS pattern.
         """
+        no_resume = SgNIPTPlugin._extra_env_for_no_resume(job)
         parts = [
             f"SGNIPT_ROOT_DIR={shlex.quote(settings.sgnipt_job_root)}",
             f"SGNIPT_DATA_DIR={shlex.quote(settings.sgnipt_data_dir)}",
             f"SGNIPT_CONFIG_DIR={shlex.quote(settings.sgnipt_config_dir)}",
             f"SGNIPT_FASTQ_DIR={shlex.quote(settings.sgnipt_fastq_dir)}",
         ]
+        if no_resume:
+            parts.insert(0, no_resume.strip())
 
         r1 = (job.fastq_r1_path or "").strip()
         if r1:
