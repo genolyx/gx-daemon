@@ -849,7 +849,8 @@ def _extract_order_genes(result_data: Dict[str, Any]) -> set:
     """
     유전자 심볼 집합을 result.json에서 추출.
     carrier screening: result_data["variants"][].gene
-    sgNIPT: clinical_findings[].gene (없으면 target_name 앞부분) + all_target_variants[]
+    sgNIPT: prefer variants[] / clinical_findings[]; skip all_target_variants when
+    those are present (all_target is a near-duplicate and inflates gene-knowledge cost).
     """
     genes: set = set()
 
@@ -869,8 +870,10 @@ def _extract_order_genes(result_data: Dict[str, Any]) -> set:
         _add_gene(v)
     for v in (result_data.get("clinical_findings") or []):
         _add_gene(v)
-    for v in (result_data.get("all_target_variants") or []):
-        _add_gene(v)
+    # Only fall back to all_target_variants when no gene-bearing rows exist yet
+    if not genes:
+        for v in (result_data.get("all_target_variants") or []):
+            _add_gene(v)
     for v in (result_data.get("findings") or []):
         _add_gene(v)
     for v in (result_data.get("confirmed_variants") or []):
@@ -942,11 +945,10 @@ def _compute_order_gene_knowledge(
     variant_keys_set: set = set()
     # Build per-gene variant lists for local provider
     gene_variants: Dict[str, list] = {g: [] for g in gene_set}
-    all_variants = (
-        (result_data.get("variants") or [])
-        + (result_data.get("clinical_findings") or [])
-        + (result_data.get("all_target_variants") or [])
-    )
+    # Prefer variants / clinical_findings; all_target_variants is a near-duplicate on sgNIPT
+    # and roughly doubles gene-knowledge work when concatenated.
+    primary = list(result_data.get("variants") or []) + list(result_data.get("clinical_findings") or [])
+    all_variants = primary if primary else list(result_data.get("all_target_variants") or [])
     for v in all_variants:
         g = (v.get("gene") or "").strip().upper()
         if not g:
