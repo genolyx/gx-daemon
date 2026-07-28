@@ -11,9 +11,19 @@ import logging
 from typing import Dict, List, Optional, Set
 from collections import defaultdict
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from .config import settings
-from .datetime_kst import now_kst_iso
-from .models import Job, OrderStatus, QueueSummary
+from .datetime_kst import now_kst_iso, now_kst_date_iso, KST
+from .models import (
+    Job,
+    OrderStatus,
+    QueueSummary,
+    QueueSummaryTotals,
+    QueueSummaryServiceRow,
+    QueueSummarySlotGroup,
+)
 
 # Service → resource group mapping.
 # "exome" group is the heavy one (carrier_screening / whole_exome / health_screening).
@@ -24,6 +34,34 @@ _SERVICE_GROUP: dict[str, str] = {
     "health_screening": "exome",
     "sgnipt": "sgnipt",
 }
+
+_SERVICE_DISPLAY: dict[str, str] = {
+    "nipt": "NIPT",
+    "sgnipt": "sgNIPT",
+    "carrier_screening": "Carrier Screening",
+    "whole_exome": "Whole Exome",
+    "health_screening": "Health Screening",
+}
+
+_GROUP_SERVICES: dict[str, list[str]] = {
+    "nipt": ["nipt"],
+    "sgnipt": ["sgnipt"],
+    "exome": ["carrier_screening", "whole_exome", "health_screening"],
+}
+
+
+def _iso_to_kst_date(value: Optional[str]) -> Optional[str]:
+    """Parse job timestamp → YYYY-MM-DD in KST (None if unparseable)."""
+    if not value or not str(value).strip():
+        return None
+    raw = str(value).strip().replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+    return dt.astimezone(KST).date().isoformat()
 
 # Dequeue priority when NIPT_PRIORITY=true (lower = dequeued first).
 # NIPT runs first; sgnipt before heavy exome.
@@ -948,16 +986,81 @@ class QueueManager:
         return []
 
     def get_summary(self) -> QueueSummary:
-        """큐 상태 요약 (통계는 현재 주문 스냅샷; 카운트=대시보드 버킷과 일치)."""
+        """
+        Admin queue summary.
+
+        - Live: queued / running (+ per-service max_parallel from slot groups)
+        - Today (KST): completed_today / failed_today by ``completed_at`` (fallback ``started_at``)
+        - Legacy fields kept for older Portal / service-daemon clients
+        """
+        today = now_kst_date_iso()
         stats_by_service = self.snapshot_stats_by_service()
-        total_queued = sum(s["queued"] for s in stats_by_service.values())
-        total_running = sum(s["running"] for s in stats_by_service.values())
+        slots = self.group_slot_status
+
+        enabled = [
+            s.strip()
+            for s in (settings.enabled_service_list or [])
+            if isinstance(s, str) and s.strip()
+        ]
+        service_codes = list(dict.fromkeys(
+            enabled
+            + list(stats_by_service.keys())
+            + [c for codes in _GROUP_SERVICES.values() for c in codes]
+        ))
+
+        today_completed: Dict[str, int] = defaultdict(int)
+        today_failed: Dict[str, int] = defaultdict(int)
+        for j in self.iter_all_jobs_unique():
+            svc = j.service_code or ""
+            day = _iso_to_kst_date(j.completed_at) or _iso_to_kst_date(j.started_at)
+            if day != today:
+                continue
+            if j.status in (OrderStatus.COMPLETED, OrderStatus.REPORT_READY):
+                today_completed[svc] += 1
+            elif j.status == OrderStatus.FAILED:
+                today_failed[svc] += 1
+
+        services: List[QueueSummaryServiceRow] = []
+        for svc in service_codes:
+            group = _SERVICE_GROUP.get(svc, "unknown")
+            slot = slots.get(group, {})
+            st = stats_by_service.get(svc, {})
+            services.append(
+                QueueSummaryServiceRow(
+                    service_code=svc,
+                    display_name=_SERVICE_DISPLAY.get(svc, svc),
+                    slot_group=group,
+                    max_parallel=int(slot.get("limit", 0)),
+                    running=int(st.get("running", 0)),
+                    queued=int(st.get("queued", 0)),
+                    available=int(slot.get("available", 0)),
+                    completed_today=int(today_completed.get(svc, 0)),
+                    failed_today=int(today_failed.get(svc, 0)),
+                )
+            )
+
+        slot_groups: List[QueueSummarySlotGroup] = []
+        for group, limit in self._group_limits.items():
+            slot = slots.get(group, {})
+            slot_groups.append(
+                QueueSummarySlotGroup(
+                    group=group,
+                    max_parallel=int(slot.get("limit", limit)),
+                    running=int(slot.get("running", 0)),
+                    queued=int(slot.get("queued", 0)),
+                    available=int(slot.get("available", 0)),
+                    services=list(_GROUP_SERVICES.get(group, [])),
+                )
+            )
+
+        total_queued = sum(s.queued for s in services)
+        total_running = sum(s.running for s in services)
+        completed_today = sum(s.completed_today for s in services)
+        failed_today = sum(s.failed_today for s in services)
+
+        # Legacy snapshot totals (all jobs still known to daemon — not "today")
         total_completed = sum(s["completed"] for s in stats_by_service.values())
         total_failed = sum(s["failed"] for s in stats_by_service.values())
-
-        jobs_by_service = {
-            svc: st["queued"] + st["running"] for svc, st in stats_by_service.items()
-        }
 
         running_jobs = [
             {
@@ -966,11 +1069,16 @@ class QueueManager:
                 "sample_name": j.sample_name,
                 "status": j.status.value,
                 "progress": j.progress,
+                "message": j.message or "",
                 "started_at": j.started_at,
             }
             for j in self._running_jobs.values()
         ]
 
+        jobs_by_service = {
+            svc: int(st.get("queued", 0)) + int(st.get("running", 0))
+            for svc, st in stats_by_service.items()
+        }
         stats_out = {
             svc: {
                 "queued": int(st["queued"]),
@@ -982,13 +1090,22 @@ class QueueManager:
         }
 
         return QueueSummary(
+            today=today,
+            totals=QueueSummaryTotals(
+                queued=total_queued,
+                running=total_running,
+                completed_today=completed_today,
+                failed_today=failed_today,
+            ),
+            services=services,
+            slot_groups=slot_groups,
+            running_jobs=running_jobs,
             total_queued=total_queued,
             total_running=total_running,
             total_completed=total_completed,
             total_failed=total_failed,
             jobs_by_service=jobs_by_service,
             stats_by_service=stats_out,
-            running_jobs=running_jobs,
         )
 
     @property

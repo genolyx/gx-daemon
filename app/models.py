@@ -444,14 +444,58 @@ class VariantKnowledgeSaveRequest(BaseModel):
     variant_notes: str = Field(default="")
 
 
+class QueueSummaryTotals(BaseModel):
+    """Admin Summary — live + today counters."""
+
+    queued: int = 0
+    running: int = 0
+    completed_today: int = 0
+    failed_today: int = 0
+
+
+class QueueSummaryServiceRow(BaseModel):
+    service_code: str
+    display_name: str = ""
+    slot_group: str
+    max_parallel: int = 0
+    running: int = 0
+    queued: int = 0
+    available: int = 0
+    completed_today: int = 0
+    failed_today: int = 0
+
+
+class QueueSummarySlotGroup(BaseModel):
+    group: str
+    max_parallel: int = 0
+    running: int = 0
+    queued: int = 0
+    available: int = 0
+    services: List[str] = Field(default_factory=list)
+
+
 class QueueSummary(BaseModel):
+    """
+    Admin queue summary for Portal Dashboard.
+
+    Preferred fields: ``totals``, ``services``, ``slot_groups``, ``running_jobs``, ``today``.
+    Legacy fields (``total_*``, ``stats_by_service``, …) remain for older clients.
+    """
+
+    # ── New Admin schema ──────────────────────────────────
+    today: str = ""  # YYYY-MM-DD (KST)
+    totals: QueueSummaryTotals = Field(default_factory=QueueSummaryTotals)
+    services: List[QueueSummaryServiceRow] = Field(default_factory=list)
+    slot_groups: List[QueueSummarySlotGroup] = Field(default_factory=list)
+    running_jobs: List[Dict[str, Any]] = Field(default_factory=list)
+
+    # ── Legacy (service-daemon / older Portal) ────────────
     total_queued: int = 0
     total_running: int = 0
     total_completed: int = 0
     total_failed: int = 0
     jobs_by_service: Dict[str, int] = Field(default_factory=dict)
     stats_by_service: Dict[str, Dict[str, int]] = Field(default_factory=dict)
-    running_jobs: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 # Aliases for backward compatibility
