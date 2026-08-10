@@ -52,6 +52,21 @@ _GROUP_SERVICES: dict[str, list[str]] = {
 
 def _iso_to_kst_date(value: Optional[str]) -> Optional[str]:
     """Parse job timestamp → YYYY-MM-DD in KST (None if unparseable)."""
+    dt = _parse_iso_dt(value)
+    if not dt:
+        return None
+    return dt.astimezone(KST).date().isoformat()
+
+
+def _iso_to_utc_date(value: Optional[str]) -> Optional[str]:
+    """Parse job timestamp → YYYY-MM-DD in UTC (nipt-daemon / Cloud Portal)."""
+    dt = _parse_iso_dt(value)
+    if not dt:
+        return None
+    return dt.astimezone(ZoneInfo("UTC")).date().isoformat()
+
+
+def _parse_iso_dt(value: Optional[str]) -> Optional[datetime]:
     if not value or not str(value).strip():
         return None
     raw = str(value).strip().replace("Z", "+00:00")
@@ -61,7 +76,19 @@ def _iso_to_kst_date(value: Optional[str]) -> Optional[str]:
         return None
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=ZoneInfo("UTC"))
-    return dt.astimezone(KST).date().isoformat()
+    return dt
+
+
+def _duration_seconds(start: Optional[str], end: Optional[str]) -> Optional[int]:
+    s = _parse_iso_dt(start)
+    e = _parse_iso_dt(end)
+    if not s or not e:
+        return None
+    return max(0, int((e - s).total_seconds()))
+
+
+def _utc_today_iso() -> str:
+    return datetime.now(ZoneInfo("UTC")).date().isoformat()
 
 # Dequeue priority when NIPT_PRIORITY=true (lower = dequeued first).
 # NIPT runs first; sgnipt before heavy exome.
@@ -1089,21 +1116,152 @@ class QueueManager:
             for svc, st in stats_by_service.items()
         }
 
+        # ── Cloud Portal / nipt-daemon compatible fields ──
+        # _today = UTC calendar day; _total = in-memory cumulative (daemon uptime)
+        utc_today = _utc_today_iso()
+        all_jobs = list(self.iter_all_jobs_unique())
+        running_ids = set(self._running_jobs.keys())
+
+        queued_jobs = [j for j in all_jobs if j.status == OrderStatus.QUEUED]
+        running_job_list = list(self._running_jobs.values())
+        completed_jobs = [
+            j for j in all_jobs
+            if j.status in (OrderStatus.COMPLETED, OrderStatus.REPORT_READY)
+            and j.order_id not in running_ids
+        ]
+        failed_jobs = [
+            j for j in all_jobs
+            if j.status == OrderStatus.FAILED and j.order_id not in running_ids
+        ]
+
+        # nipt-daemon: today membership uses queue timestamp / start_time (UTC)
+        today_requested_ids: Set[str] = set()
+        for j in queued_jobs:
+            if _iso_to_utc_date(j.created_at or j.updated_at) == utc_today:
+                today_requested_ids.add(j.order_id)
+        for j in running_job_list:
+            if _iso_to_utc_date(j.started_at) == utc_today:
+                today_requested_ids.add(j.order_id)
+
+        today_completed_jobs: List[Job] = []
+        for j in completed_jobs:
+            if _iso_to_utc_date(j.started_at) == utc_today:
+                today_requested_ids.add(j.order_id)
+                today_completed_jobs.append(j)
+
+        today_failed_jobs: List[Job] = []
+        for j in failed_jobs:
+            if _iso_to_utc_date(j.started_at) == utc_today:
+                today_requested_ids.add(j.order_id)
+                today_failed_jobs.append(j)
+
+        completed_ids = {j.order_id for j in today_completed_jobs}
+        today_failed_jobs = [j for j in today_failed_jobs if j.order_id not in completed_ids]
+
+        max_parallel = sum(int(v) for v in self._group_limits.values()) or int(
+            getattr(settings, "max_concurrent_jobs", 0) or 0
+        )
+        n_running = len(running_job_list)
+        n_queued = len(queued_jobs)
+        n_completed_total = len(completed_jobs)
+        n_failed_total = len(failed_jobs)
+        # requested_samples_total = queue + running + completed + failed (memory)
+        n_requested_total = n_queued + n_running + n_completed_total + n_failed_total
+        n_completed_today = len(today_completed_jobs)
+        n_failed_today = len(today_failed_jobs)
+        n_requested_today = len(today_requested_ids)
+        running_ratio = f"{n_running}/{max_parallel}"
+
+        queue_waiting_list = [
+            {
+                "order_id": j.order_id,
+                "service_code": j.service_code,
+                "queued_at": j.created_at or j.updated_at or "",
+            }
+            for j in queued_jobs
+        ]
+        running_list = [
+            {
+                "order_id": j.order_id,
+                "service_code": j.service_code,
+                "status": "analyzing",
+                "started_at": j.started_at or "",
+            }
+            for j in running_job_list
+        ]
+        completed_today_list = [
+            {
+                "order_id": j.order_id,
+                "service_code": j.service_code,
+                "completed_at": j.completed_at or "",
+                "duration_seconds": _duration_seconds(j.started_at, j.completed_at),
+            }
+            for j in today_completed_jobs
+        ]
+        failed_today_list = [
+            {
+                "order_id": j.order_id,
+                "service_code": j.service_code,
+                "failed_at": j.completed_at or j.started_at or "",
+                "message": j.message or "Unknown error",
+            }
+            for j in today_failed_jobs
+        ]
+
+        details = {
+            "queue_waiting_list": queue_waiting_list,
+            "running_list": running_list,
+            "completed_today_list": completed_today_list,
+            "failed_today_list": failed_today_list,
+            "queue_items": [j.order_id for j in queued_jobs],
+            "running_items": {
+                j.order_id: {"start_time": j.started_at or ""}
+                for j in running_job_list
+            },
+            "completed_today": {
+                j.order_id: {
+                    "start_time": j.started_at or "",
+                    "end_time": j.completed_at or "",
+                }
+                for j in today_completed_jobs
+            },
+            "failed_today": {
+                j.order_id: {
+                    "start_time": j.started_at or "",
+                    "end_time": j.completed_at or "",
+                    "message": j.message or "Unknown error",
+                }
+                for j in today_failed_jobs
+            },
+        }
+
         return QueueSummary(
+            # Cloud / nipt-daemon fields (UTC day / in-memory totals)
+            requested_samples_today=n_requested_today,
+            running=running_ratio,
+            max_parallel=max_parallel,
+            queue_waiting=n_queued,
+            completed_today=n_completed_today,
+            failed_today=n_failed_today,
+            requested_samples_total=n_requested_total,
+            completed_total=n_completed_total,
+            failed_total=n_failed_total,
+            details=details,
+            # gx-portal fields (KST day for services table)
             today=today,
             totals=QueueSummaryTotals(
-                queued=total_queued,
-                running=total_running,
-                completed_today=completed_today,
-                failed_today=failed_today,
+                queued=n_queued,
+                running=n_running,
+                completed_today=n_completed_today,
+                failed_today=n_failed_today,
             ),
             services=services,
             slot_groups=slot_groups,
             running_jobs=running_jobs,
-            total_queued=total_queued,
-            total_running=total_running,
-            total_completed=total_completed,
-            total_failed=total_failed,
+            total_queued=n_queued,
+            total_running=n_running,
+            total_completed=n_completed_total,
+            total_failed=n_failed_total,
             jobs_by_service=jobs_by_service,
             stats_by_service=stats_out,
         )

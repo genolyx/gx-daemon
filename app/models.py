@@ -478,11 +478,28 @@ class QueueSummary(BaseModel):
     """
     Admin queue summary for Portal Dashboard.
 
-    Preferred fields: ``totals``, ``services``, ``slot_groups``, ``running_jobs``, ``today``.
-    Legacy fields (``total_*``, ``stats_by_service``, …) remain for older clients.
+    Cloud Portal / nipt-daemon compatible fields:
+      requested_samples_today, running ("n/max"), queue_waiting,
+      completed_today, failed_today, requested_samples_total,
+      completed_total, failed_total, details{*_list, legacy maps}
+
+    gx-portal also uses: ``totals``, ``services``, ``slot_groups``, ``running_jobs``, ``today``.
     """
 
-    # ── New Admin schema ──────────────────────────────────
+    # ── Cloud Portal / nipt-daemon compatible ─────────────
+    # _today = calendar day (UTC); _total = in-memory cumulative while daemon is up
+    requested_samples_today: int = 0
+    running: Any = 0  # HTTP: "n/max" string (Cloud Portal); internals also keep totals.running
+    max_parallel: int = 0
+    queue_waiting: int = 0
+    completed_today: int = 0
+    failed_today: int = 0
+    requested_samples_total: int = 0
+    completed_total: int = 0
+    failed_total: int = 0
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+    # ── gx-portal Admin schema ────────────────────────────
     today: str = ""  # YYYY-MM-DD (KST)
     totals: QueueSummaryTotals = Field(default_factory=QueueSummaryTotals)
     services: List[QueueSummaryServiceRow] = Field(default_factory=list)
