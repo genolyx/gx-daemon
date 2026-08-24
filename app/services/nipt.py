@@ -388,18 +388,34 @@ class NIPTPlugin(ServicePlugin):
         return True
 
     # ── QC post-processing helpers ───────────────────────────────────
-    def _parse_qc_filter_txt(self, qc_filter_path: str) -> Dict[str, Any]:
-        """Parse Output_QC/<order_id>.qc.filter.txt into sequencing_metrics dict."""
-        metrics: Dict[str, Any] = {}
-        if not os.path.isfile(qc_filter_path):
-            return metrics
+    def _parse_qc_filter_txt(
+        self, qc_filter_path: str
+    ) -> Tuple[Dict[str, Any], Optional[str]]:
+        """Parse Output_QC/<order_id>.qc.filter.txt into sequencing_metrics.
 
+        Returns ``(metrics, overall_status)`` where overall_status is the
+        ``overall`` row's PASS/FAIL when present (else None).
+
+        Field set matches gx-nipt ``generate_json_output`` sequencing_metrics
+        (including mean_coverage / mean_mapping_quality).
+        """
+        metrics: Dict[str, Any] = {}
+        overall: Optional[str] = None
+        if not os.path.isfile(qc_filter_path):
+            return metrics, overall
+
+        # qc.filter key → (json_key, default_unit, default_threshold_label)
         field_map = {
-            "number_of_reads":       ("total_reads",       "reads", ">10M"),
-            "number_of_mapped_reads":("mapped_reads",       "reads", ""),
-            "mapping_rate":          ("mapping_rate",       "%",     ">85%"),
-            "duplication_rate":      ("duplication_rate",   "%",     "<40%"),
-            "gc_content":            ("gc_content",         "%",     "33~55%"),
+            "number_of_reads": ("total_reads", "reads", ">10M"),
+            "number_of_mapped_reads": ("mapped_reads", "reads", ""),
+            "mapping_rate": ("mapping_rate", "%", ">85%"),
+            "number_of_duplicated_reads": ("duplicated_reads", "reads", ""),
+            "duplication_rate": ("duplication_rate", "%", "<40%"),
+            "gc_content": ("gc_content", "%", "33~55%"),
+            "GC_content": ("gc_content", "%", "33~55%"),
+            "mean_mapping_quality": ("mean_mapping_quality", "score", ">20"),
+            "mean_coverage": ("mean_coverage", "X", ">0.1X"),
+            "mean_coverageData": ("mean_coverage", "X", ">0.1X"),
         }
         try:
             with open(qc_filter_path, encoding="utf-8") as f:
@@ -408,14 +424,29 @@ class NIPTPlugin(ServicePlugin):
                     if len(parts) < 2:
                         continue
                     key = parts[0].strip()
+                    if key == "sample_id":
+                        continue
+                    if key == "overall":
+                        overall = parts[-1].strip().upper() or None
+                        continue
                     if key not in field_map:
                         continue
-                    out_key, unit, threshold = field_map[key]
+                    out_key, unit, default_threshold = field_map[key]
                     try:
-                        value = float(parts[1].strip())
+                        raw_val = parts[1].strip().replace("%", "").replace("X", "").replace("x", "")
+                        value = float(raw_val)
                     except (ValueError, IndexError):
                         continue
-                    status = parts[-1].strip() if len(parts) >= 4 else "UNKNOWN"
+                    # Format: metric value [threshold comparator] status
+                    if len(parts) >= 5:
+                        threshold = parts[2].strip() or default_threshold
+                        status = parts[4].strip() or "UNKNOWN"
+                    elif len(parts) >= 4:
+                        threshold = parts[2].strip() or default_threshold
+                        status = parts[3].strip() or "UNKNOWN"
+                    else:
+                        threshold = default_threshold
+                        status = parts[-1].strip() if len(parts) >= 3 else "UNKNOWN"
                     metrics[out_key] = {
                         "value": value,
                         "status": status,
@@ -424,10 +455,10 @@ class NIPTPlugin(ServicePlugin):
                     }
         except OSError as e:
             logger.warning("[nipt] Could not parse qc.filter.txt: %s", e)
-        return metrics
+        return metrics, overall
 
     def _build_analysis_qc(self, final_results: Dict[str, Any]) -> Dict[str, Any]:
-        """Build analysis_qc section from final_results fields."""
+        """Build analysis_qc section from final_results (pipeline-parity keys)."""
         aqc: Dict[str, Any] = {}
 
         ff_yff = final_results.get("fetal_fraction_yff")
@@ -450,19 +481,6 @@ class NIPTPlugin(ServicePlugin):
             "threshold": ">4.0%",
         }
 
-        ff_final = final_results.get("fetal_fraction_ff_final")
-        try:
-            ff_final_f = float(ff_final) if ff_final not in (None, "NA", "N/A") else None
-        except (TypeError, ValueError):
-            ff_final_f = None
-        if ff_final_f is not None:
-            aqc["fetal_fraction_final"] = {
-                "value": ff_final_f,
-                "unit": "%",
-                "status": "PASS" if ff_final_f >= 4.0 else "FAIL",
-                "threshold": ">4.0%",
-            }
-
         ff_ratio = final_results.get("ff_ratio")
         try:
             ff_ratio_f = float(ff_ratio) if ff_ratio not in (None, "NA", "N/A") else None
@@ -484,8 +502,40 @@ class NIPTPlugin(ServicePlugin):
 
         return aqc
 
+    @staticmethod
+    def _apply_qc_fail(
+        data: Dict[str, Any],
+        nipt: Dict[str, Any],
+        final_results: Dict[str, Any],
+        reason: str,
+    ) -> None:
+        """Set QC_result=FAIL and No-call review comments (pipeline parity)."""
+        final_results["QC_result"] = "FAIL"
+        nipt["final_results"] = final_results
+        review = nipt.setdefault("review", {})
+        for who in ("reviewer1", "reviewer2"):
+            block = review.setdefault(who, {})
+            block["Trisomy_result"] = "No call"
+            block["MD_result"] = "No call"
+            prev_t = (block.get("Trisomy_comment") or "").strip()
+            prev_m = (block.get("MD_comment") or "").strip()
+            if reason and reason not in prev_t:
+                block["Trisomy_comment"] = f"{prev_t}, {reason}".strip(", ") if prev_t else reason
+            elif not prev_t:
+                block["Trisomy_comment"] = reason
+            if reason and reason not in prev_m:
+                block["MD_comment"] = f"{prev_m}, {reason}".strip(", ") if prev_m else reason
+            elif not prev_m:
+                block["MD_comment"] = reason
+        data["NIPT"] = nipt
+
     def _enrich_result_json(self, json_path: str, order_id: str) -> None:
-        """Post-process the pipeline JSON to fill empty QC fields."""
+        """Post-process the pipeline JSON to fill empty QC fields.
+
+        Safety net when sequencing_metrics / analysis_qc were left empty:
+        refill from qc.filter.txt (full field set) and sync QC_result from
+        the filter ``overall`` row so Portal does not keep a false PASS.
+        """
         try:
             with open(json_path, encoding="utf-8") as f:
                 data = json.load(f)
@@ -498,15 +548,19 @@ class NIPTPlugin(ServicePlugin):
         final_results = nipt.get("final_results", {})
 
         changed = False
+        overall_status: Optional[str] = None
 
         # 1. Fill sequencing_metrics from qc.filter.txt if empty
         if not qc.get("sequencing_metrics"):
             output_dir = os.path.dirname(json_path)
             qc_filter = os.path.join(output_dir, "Output_QC", f"{order_id}.qc.filter.txt")
-            metrics = self._parse_qc_filter_txt(qc_filter)
+            metrics, overall_status = self._parse_qc_filter_txt(qc_filter)
             if metrics:
                 qc["sequencing_metrics"] = metrics
-                logger.info("[nipt] Filled sequencing_metrics (%d fields) from qc.filter.txt", len(metrics))
+                logger.info(
+                    "[nipt] Filled sequencing_metrics (%d fields) from qc.filter.txt",
+                    len(metrics),
+                )
                 changed = True
 
         # 2. Fill analysis_qc from final_results if empty
@@ -517,8 +571,30 @@ class NIPTPlugin(ServicePlugin):
                 logger.info("[nipt] Filled analysis_qc (%d fields) from final_results", len(aqc))
                 changed = True
 
+        # 3. Sync QC_result when filter overall is FAIL but JSON still PASS/empty
+        current_qc = str(final_results.get("QC_result") or "").strip().upper()
+        if overall_status is None and qc.get("sequencing_metrics"):
+            # Re-read overall if metrics were already present but we still need sync
+            output_dir = os.path.dirname(json_path)
+            qc_filter = os.path.join(output_dir, "Output_QC", f"{order_id}.qc.filter.txt")
+            _, overall_status = self._parse_qc_filter_txt(qc_filter)
+
+        if overall_status == "FAIL" and current_qc in ("", "PASS", "UNKNOWN"):
+            self._apply_qc_fail(
+                data, nipt, final_results,
+                "sequencing QC overall FAIL (from qc.filter.txt)",
+            )
+            # refresh overall_qc display if we just built analysis_qc
+            aqc = qc.get("analysis_qc") or {}
+            if aqc:
+                aqc["overall_qc"] = {"value": "FAIL", "status": "FAIL"}
+                qc["analysis_qc"] = aqc
+            changed = True
+            logger.info("[nipt] Synced QC_result=FAIL from qc.filter overall")
+
         if changed:
             nipt["quality_control"] = qc
+            nipt["final_results"] = final_results
             data["NIPT"] = nipt
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)

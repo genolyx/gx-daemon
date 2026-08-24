@@ -56,6 +56,61 @@ def _read_log_tail(path: str, max_chars: int = 4000) -> str:
         return ""
 
 
+def _extract_pipeline_fail_reason(job: Job) -> str:
+    """Prefer run_nipt.sh Reason / FAIL_REASON over a bare exit code.
+
+    Sources (first hit wins):
+      1. ``{output_dir}/{order_id}.failed`` ``Reason:`` line
+      2. ``FAIL_REASON=`` in pipeline.log (tail)
+      3. last ``FAILED`` progress line message
+    """
+    oid = (job.order_id or "").strip()
+    out = job.output_dir or ""
+    if oid and out:
+        failed_path = os.path.join(out, f"{oid}.failed")
+        if os.path.isfile(failed_path):
+            try:
+                with open(failed_path, "r", errors="replace") as fh:
+                    for line in fh:
+                        s = line.strip()
+                        if s.lower().startswith("reason:"):
+                            reason = s.split(":", 1)[1].strip()
+                            if reason:
+                                return reason
+            except OSError:
+                pass
+
+    log_tail = _read_log_tail(_pipeline_log_path(job), 12000)
+    if log_tail:
+        for line in reversed(log_tail.splitlines()):
+            if "FAIL_REASON=" in line:
+                return line.split("FAIL_REASON=", 1)[1].strip()
+
+    if oid and out:
+        progress_path = os.path.join(out, f"{oid}_progress.txt")
+        if os.path.isfile(progress_path):
+            try:
+                with open(progress_path, "r", errors="replace") as fh:
+                    lines = fh.readlines()
+                for line in reversed(lines):
+                    # run_nipt: '[ts] FAILED      reason'
+                    bracket = line.find("]")
+                    if bracket < 0:
+                        continue
+                    after = line[bracket + 1 :].strip()
+                    if not after.upper().startswith("FAILED"):
+                        continue
+                    rest = after[6:].strip()
+                    if rest.startswith("(") and ")" in rest:
+                        rest = rest.split(")", 1)[1].strip()
+                    if rest:
+                        return rest
+                    break
+            except OSError:
+                pass
+    return ""
+
+
 class PipelineRunner:
     """
     범용 파이프라인 실행기.
@@ -246,6 +301,11 @@ class PipelineRunner:
                     tail = _read_log_tail(_pipeline_log_path(job), 6000).strip()
                     if tail:
                         hint += "\n\n--- pipeline.log (tail) ---\n" + tail
+                reason = _extract_pipeline_fail_reason(job)
+                if reason:
+                    raise RuntimeError(
+                        f"Pipeline exited with code {exit_code}: {reason}{hint}"
+                    )
                 raise RuntimeError(
                     f"Pipeline exited with code {exit_code}{hint}"
                 )
