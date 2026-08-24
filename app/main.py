@@ -1433,7 +1433,7 @@ async def daemon_log(lines: int = Query(default=200, ge=1, le=500)):
 # PLATFORM SUBMIT (nipt-daemon style)
 # ══════════════════════════════════════════════════════════════
 
-def _detect_service_code(dto_type: str) -> str:
+def _detect_service_code(dto_type: Optional[str]) -> str:
     """Detect service_code from the Platform order type field.
 
     Gx-Portal sends type="CLIENT" (patient classification, not service type).
@@ -2552,11 +2552,17 @@ async def generate_report_from_html(order_id: str, request: Request):
 
 @app.post("/analysis/order/{order_id}/report")
 async def platform_generate_report(order_id: str, request: Request):
-    """Generate report and upload to Platform (nipt-daemon compatible)."""
+    """Generate report and upload to Platform (nipt-daemon compatible).
+
+    NIPT uses the dedicated ``/nipt-report`` flow (not plugin.generate_report).
+    """
     qm = get_queue_manager()
     job = qm.get_job(order_id)
     if not job:
         raise HTTPException(404, f"Order not found: {order_id}")
+
+    if job.service_code == "nipt":
+        return await generate_nipt_report(order_id, request)
 
     try:
         body = await request.json()

@@ -141,8 +141,16 @@ class PipelineRunner:
                         continue
                     job = get_task.result()
 
-                # 서비스 그룹별 슬롯 획득
-                await self._queue_manager.acquire_slot(job.service_code)
+                # 서비스 그룹별 슬롯 획득 — 슬롯이 없으면 재큐잉해 다른 서비스 HOL 블로킹 방지
+                acquired = await self._queue_manager.try_acquire_slot(job.service_code)
+                if not acquired:
+                    logger.info(
+                        "Worker-%s: no slot for %s [%s] — requeue",
+                        worker_id, job.order_id, job.service_code,
+                    )
+                    await self._queue_manager.requeue_for_slot(job)
+                    await asyncio.sleep(0.05)
+                    continue
 
                 try:
                     await self._execute_job(job, worker_id)
@@ -299,9 +307,11 @@ class PipelineRunner:
                     if r.status == NotificationStatus.FAILED
                 ]
                 if failed_uploads:
-                    logger.warning(
-                        f"[{job.service_code}] Some uploads failed: {failed_uploads}"
+                    error_msg = f"Upload failed for: {', '.join(failed_uploads)}"
+                    logger.error(
+                        f"[{job.service_code}] {error_msg}"
                     )
+                    raise RuntimeError(error_msg)
 
             # ── Step 6: 완료 알림 ──
             await self._update_status(job, OrderStatus.COMPLETED, 100, "Analysis completed")

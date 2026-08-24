@@ -14,16 +14,36 @@ from .models import NotificationStatus
 logger = logging.getLogger(__name__)
 
 
-async def notify_aws_result(order_id: str, success: bool, log: str = ""):
+def _resolve_service_code(order_id: str, service_code: Optional[str] = None) -> str:
+    if service_code:
+        return service_code
+    try:
+        from .queue_manager import get_queue_manager
+        job = get_queue_manager().get_job(order_id)
+        if job and job.service_code:
+            return job.service_code
+    except Exception as e:
+        logger.debug("Could not resolve service_code for %s: %s", order_id, e)
+    # NIPT report endpoints are the primary callers of these wrappers.
+    return "nipt"
+
+
+async def notify_aws_result(
+    order_id: str, success: bool, log: str = "", service_code: Optional[str] = None
+):
     client = get_platform_client()
-    result = await client.notify_analysis_result(order_id, "carrier_screening", success, log)
+    sc = _resolve_service_code(order_id, service_code)
+    result = await client.notify_analysis_result(order_id, sc, success, log)
     if result.status == NotificationStatus.FAILED:
         raise Exception(result.message)
 
 
-async def notify_aws_failed(order_id: str, failed_reason: str):
+async def notify_aws_failed(
+    order_id: str, failed_reason: str, service_code: Optional[str] = None
+):
     client = get_platform_client()
-    result = await client.notify_analysis_failed(order_id, "carrier_screening", failed_reason)
+    sc = _resolve_service_code(order_id, service_code)
+    result = await client.notify_analysis_failed(order_id, sc, failed_reason)
     if result.status == NotificationStatus.FAILED:
         raise Exception(result.message)
 

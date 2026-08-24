@@ -293,7 +293,7 @@ class QueueManager:
 
         queued_list.sort(key=lambda j: j.created_at or "")
         for j in queued_list:
-            self._queue.put_nowait(j)
+            self._queue.put_nowait(self._pack_queue_item(j))
 
         logger.info(
             "Restored %d order(s) from SQLite (queued=%d, interrupted→failed=%d)",
@@ -357,13 +357,7 @@ class QueueManager:
             self._jobs[job.order_id] = job
             self._stats[job.service_code]["queued"] += 1
 
-        # priority=0 is highest. When NIPT_PRIORITY=false all services get priority=1 (FIFO).
-        priority = (
-            _SERVICE_DEQUEUE_PRIORITY.get(job.service_code, 1)
-            if self._nipt_priority
-            else 1
-        )
-        await self._queue.put((priority, next(self._seq), job))
+        await self._queue.put(self._pack_queue_item(job))
         queue_size = self._queue.qsize()
 
         logger.info(
@@ -373,6 +367,22 @@ class QueueManager:
         await self.persist_job(job)
         return queue_size
 
+    def _pack_queue_item(self, job: Job) -> tuple:
+        """PriorityQueue item: (priority, seq, job). priority=0 is highest."""
+        priority = (
+            _SERVICE_DEQUEUE_PRIORITY.get(job.service_code, 1)
+            if self._nipt_priority
+            else 1
+        )
+        return (priority, next(self._seq), job)
+
+    @staticmethod
+    def _unpack_queue_item(raw) -> Job:
+        """Accept (priority, seq, job) tuples; tolerate legacy bare Job during upgrades."""
+        if isinstance(raw, tuple) and len(raw) == 3:
+            return raw[2]
+        return raw
+
     async def dequeue(self) -> Job:
         """큐에서 다음 작업을 가져옵니다 (blocking). 취소 요청된 작업은 건너뜁니다.
 
@@ -381,7 +391,7 @@ class QueueManager:
         """
         while True:
             raw = await self._queue.get()
-            _priority, _seq, job = raw  # always (priority, seq, job) tuple
+            job = self._unpack_queue_item(raw)
 
             async with self._lock:
                 if job.order_id in self._cancel_requested:
@@ -423,6 +433,32 @@ class QueueManager:
             "Acquired slot [%s/%s] (available: %d/%d)",
             service_code, group, sem._value, limit,
         )
+
+    async def try_acquire_slot(self, service_code: str = "", timeout: float = 0.05) -> bool:
+        """Non-blocking-ish slot acquire. False → caller should requeue to avoid HOL blocking."""
+        sem = self._semaphore_for(service_code)
+        try:
+            await asyncio.wait_for(sem.acquire(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return False
+        group = _SERVICE_GROUP.get(service_code, "unknown")
+        limit = self._group_limits.get(group, self._max_concurrent)
+        logger.debug(
+            "Acquired slot [%s/%s] (available: %d/%d)",
+            service_code, group, sem._value, limit,
+        )
+        return True
+
+    async def requeue_for_slot(self, job: Job) -> None:
+        """Put a dequeued job back on the queue after a failed try_acquire_slot."""
+        async with self._lock:
+            job.status = OrderStatus.QUEUED
+            job.updated_at = now_kst_iso()
+            job.message = "Waiting for service slot"
+            self._jobs[job.order_id] = job
+            self._stats[job.service_code]["queued"] += 1
+        await self._queue.put(self._pack_queue_item(job))
+        await self.persist_job(job)
 
     def release_slot(self, service_code: str = ""):
         """서비스 그룹별 실행 슬롯 반환"""
@@ -728,13 +764,14 @@ class QueueManager:
             pending: List[Job] = []
             while True:
                 try:
-                    j = self._queue.get_nowait()
+                    raw = self._queue.get_nowait()
                 except asyncio.QueueEmpty:
                     break
+                j = self._unpack_queue_item(raw)
                 if j.order_id != order_id:
                     pending.append(j)
             for j in pending:
-                self._queue.put_nowait(j)
+                self._queue.put_nowait(self._pack_queue_item(j))
             if job:
                 svc = job.service_code
                 st = job.status
@@ -778,13 +815,14 @@ class QueueManager:
             pending: List[Job] = []
             while True:
                 try:
-                    j = self._queue.get_nowait()
+                    raw = self._queue.get_nowait()
                 except asyncio.QueueEmpty:
                     break
+                j = self._unpack_queue_item(raw)
                 if j.order_id != order_id:
                     pending.append(j)
             for j in pending:
-                self._queue.put_nowait(j)
+                self._queue.put_nowait(self._pack_queue_item(j))
         logger.info("Purged queued order %s from asyncio queue", order_id)
         return job
 
@@ -1305,18 +1343,40 @@ class QueueManager:
         NIPT 우선순위 슬롯 한도도 함께 전환됩니다:
           enabled=True  → max_concurrent_nipt_priority
           enabled=False → max_concurrent_nipt
+
+        슬롯을 잡고 있는 NIPT 잡이 있으면 Semaphore 객체를 교체하지 않습니다
+        (교체 시 release가 다른 semaphore로 가서 한도 붕괴).
         """
         from .config import settings as s
         new_nipt_limit = (
             s.max_concurrent_nipt_priority if enabled else s.max_concurrent_nipt
         )
         self._nipt_priority = enabled
-        self._group_limits["nipt"] = new_nipt_limit
-        self._group_semaphores["nipt"] = asyncio.Semaphore(new_nipt_limit)
+        old_limit = self._group_limits.get("nipt", s.max_concurrent_nipt)
+        sem = self._group_semaphores.get("nipt")
+        if sem is None:
+            self._group_limits["nipt"] = new_nipt_limit
+            self._group_semaphores["nipt"] = asyncio.Semaphore(new_nipt_limit)
+        elif old_limit == new_nipt_limit:
+            pass
+        else:
+            in_use = max(0, old_limit - sem._value)
+            if in_use > 0:
+                logger.warning(
+                    "NIPT priority toggled → %s but %d nipt slot(s) in use; "
+                    "keeping semaphore (limit=%d). New limit %d applies when idle or after restart.",
+                    "ON" if enabled else "OFF",
+                    in_use,
+                    old_limit,
+                    new_nipt_limit,
+                )
+            else:
+                self._group_limits["nipt"] = new_nipt_limit
+                self._group_semaphores["nipt"] = asyncio.Semaphore(new_nipt_limit)
         logger.info(
             "NIPT priority toggled → %s (nipt_limit=%d)",
             "ON" if enabled else "OFF",
-            new_nipt_limit,
+            self._group_limits.get("nipt", new_nipt_limit),
         )
 
     @property

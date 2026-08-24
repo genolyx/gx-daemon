@@ -350,15 +350,19 @@ class SgNIPTPlugin(ServicePlugin):
     def sync_is_complete(self, job: Job) -> bool:
         """
         daemon 재시작 복구 시 파이프라인이 실제로 완료됐는지 동기적으로 확인.
-        output_dir/<order_id>.json 파이프라인 결과 파일이 존재하면 완료로 판정.
+        result JSON + output.tar 가 모두 있어야 완료로 판정 (부분 JSON만으로 복구 방지).
         """
         path = self._order_result_json(job)
-        if os.path.isfile(path):
-            logger.info(
-                "[sgnipt] sync_is_complete: found %s → marking COMPLETED", path
-            )
-            return True
-        return False
+        if not os.path.isfile(path):
+            return False
+        oid = (job.order_id or "").strip()
+        tar = os.path.join(job.output_dir or "", f"{oid}.output.tar")
+        if not os.path.isfile(tar):
+            return False
+        logger.info(
+            "[sgnipt] sync_is_complete: found %s + tar → marking COMPLETED", path
+        )
+        return True
 
     def _run_script_candidates(self) -> List[str]:
         """

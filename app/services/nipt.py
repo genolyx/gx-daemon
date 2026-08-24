@@ -115,10 +115,22 @@ class NIPTPlugin(ServicePlugin):
 
     # ── lifecycle ───────────────────────────────────────────────
     def sync_is_complete(self, job: Job) -> bool:
-        """Daemon restart: consider the job done if the final JSON exists."""
+        """Daemon restart: done only when success marker (or json+tar) exists and not failed."""
+        oid = (job.order_id or "").strip()
+        out = job.output_dir or ""
+        failed = os.path.join(out, f"{oid}.failed")
+        if os.path.isfile(failed):
+            return False
+        completed = os.path.join(out, f"{oid}.completed")
         path = self._order_result_json(job)
-        if os.path.isfile(path):
-            logger.info("[nipt] sync_is_complete: %s present → COMPLETED", path)
+        tar = self._order_output_tar(job)
+        if os.path.isfile(completed) and os.path.isfile(path):
+            logger.info("[nipt] sync_is_complete: %s present → COMPLETED", completed)
+            return True
+        if os.path.isfile(path) and os.path.isfile(tar):
+            logger.info(
+                "[nipt] sync_is_complete: %s + tar present → COMPLETED", path
+            )
             return True
         return False
 
@@ -155,7 +167,19 @@ class NIPTPlugin(ServicePlugin):
             if fqdir and self._file_under(fqdir, src_abs):
                 continue
             dst = os.path.join(fqdir, os.path.basename(src_abs))
-            if os.path.lexists(dst):
+            if os.path.islink(dst):
+                try:
+                    existing = os.path.realpath(dst)
+                except OSError:
+                    existing = ""
+                if existing == src_abs or os.readlink(dst) == src_abs:
+                    continue
+                logger.info(
+                    "[nipt] Replacing stale FASTQ symlink: %s (was %s → now %s)",
+                    dst, existing or os.readlink(dst), src_abs,
+                )
+                os.unlink(dst)
+            elif os.path.lexists(dst):
                 continue
             try:
                 os.symlink(src_abs, dst)

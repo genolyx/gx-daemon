@@ -55,11 +55,14 @@ class SubmitOrderDto(BaseModel):
     모든 서비스 공통 최소 body.
     - sequencingDataMethod: REMOTE(Platform S3 다운로드) / LOCAL(로컬 디렉토리 탐색)
     - labIdentifier: Lab별 reference data 선택에 사용 (NIPT 필수, carrier/sgNIPT 무시)
+    - type: 레거시 Cloud/Gx-Portal body 필드 (선택). URL typed submit에서는 무시됨.
 
     임상 정보(patientBirth, sampleBarcode 등)는 Platform API GET으로 가져오므로 body 불필요.
     """
     sequencingDataMethod: str
     labIdentifier: List[str] = Field(default_factory=list)
+    # Legacy Cloud Portal / Gx-Portal may send type="CLIENT" | "nipt" | ...
+    type: Optional[str] = None
 
     def is_remotedata_client(self) -> bool:
         return self.sequencingDataMethod.lower() == SequencingMethodType.REMOTE.value

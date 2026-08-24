@@ -1686,7 +1686,12 @@ class CarrierScreeningPlugin(ServicePlugin):
 
         hint_raw = (job.params or {}).get("_prior_reuse_main_vcf_hint")
         hint = ""
-        if isinstance(hint_raw, str) and hint_raw.strip():
+        # Force-Fresh must pick VCF from the new run, not a stale prior hint.
+        if (
+            isinstance(hint_raw, str)
+            and hint_raw.strip()
+            and not bool((job.params or {}).get("_pipeline_fresh"))
+        ):
             hint = normalize_legacy_carrier_container_path(hint_raw.strip()) or hint_raw.strip()
         main_vcf: str
         if hint and os.path.isfile(hint):
