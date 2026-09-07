@@ -354,27 +354,45 @@ class PipelineRunner:
 
             await self._update_status(job, OrderStatus.UPLOADING, 95, "Uploading results...")
             output_files = await plugin.get_output_files(job)
+            upload_warning = ""
 
             if output_files:
                 upload_results = await self._platform_client.upload_all_outputs(
                     job.order_id, job.service_code, output_files,
                     callback_url=job.callback_url,
                 )
-                
-                # 업로드 실패 확인
-                failed_uploads = [
-                    ft for ft, r in upload_results.items()
-                    if r.status == NotificationStatus.FAILED
-                ]
-                if failed_uploads:
-                    error_msg = f"Upload failed for: {', '.join(failed_uploads)}"
+
+                # Large analysis archives often time out at Cloudflare (524 ~100s).
+                # Do not fail the whole order for optional archive types — Portal still
+                # gets result JSON via notify_analysis_result.
+                _SOFT_UPLOAD_TYPES = frozenset({"tar", "output_tar"})
+                hard_failed = []
+                soft_failed = []
+                for ft, r in upload_results.items():
+                    if r.status != NotificationStatus.FAILED:
+                        continue
+                    if ft.lower() in _SOFT_UPLOAD_TYPES:
+                        soft_failed.append(ft)
+                    else:
+                        hard_failed.append(ft)
+
+                if soft_failed:
+                    upload_warning = f"Archive upload failed (analysis OK): {', '.join(soft_failed)}"
                     logger.error(
-                        f"[{job.service_code}] {error_msg}"
+                        "[%s] %s — marking COMPLETED anyway (Cloudflare/origin timeout is common for large tar)",
+                        job.service_code,
+                        upload_warning,
                     )
+                if hard_failed:
+                    error_msg = f"Upload failed for: {', '.join(hard_failed)}"
+                    logger.error("[%s] %s", job.service_code, error_msg)
                     raise RuntimeError(error_msg)
 
             # ── Step 6: 완료 알림 ──
-            await self._update_status(job, OrderStatus.COMPLETED, 100, "Analysis completed")
+            done_msg = "Analysis completed"
+            if upload_warning:
+                done_msg = f"Analysis completed ({upload_warning})"
+            await self._update_status(job, OrderStatus.COMPLETED, 100, done_msg)
 
             # 결과 JSON 읽기 (Portal이 full result data를 기대)
             result_data = None

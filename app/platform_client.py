@@ -437,26 +437,64 @@ class PlatformClient:
             if not os.path.exists(tar_path):
                 return NotificationResult(status=NotificationStatus.NOT_FOUND, message=f"File not found: {tar_path}")
 
-            url = f"{self._resolve_base(callback_url)}/analysis/result/{order_id}/file"
-            await auth_request(method="DELETE", url=url, timeout=30.0)
+            size_mb = os.path.getsize(tar_path) / (1024 * 1024)
+            logger.info(
+                "Uploading analysis archive for %s: %.1f MB (%s)",
+                order_id, size_mb, tar_path,
+            )
 
-            for attempt in range(3):
+            url = f"{self._resolve_base(callback_url)}/analysis/result/{order_id}/file"
+            try:
+                await auth_request(method="DELETE", url=url, timeout=30.0)
+            except Exception as del_err:
+                logger.warning(
+                    "DELETE existing analysis file for %s failed (continuing): %s",
+                    order_id, del_err,
+                )
+
+            # Cloudflare proxy timeout is ~100s (HTTP 524). Retrying the same
+            # large body three times often burns ~6 minutes without helping.
+            max_attempts = 2 if size_mb >= 20 else 3
+            last_err = ""
+            for attempt in range(max_attempts):
                 try:
-                    with open(tar_path, 'rb') as f:
-                        response = await auth_request(method="POST", url=url, files={'file': f}, timeout=300.0)
+                    # Disable Expect: 100-continue — some CF/origin paths mishandle it on large POSTs
+                    with open(tar_path, "rb") as f:
+                        response = await auth_request(
+                            method="POST",
+                            url=url,
+                            files={"file": (os.path.basename(tar_path), f, "application/x-tar")},
+                            headers={"Expect": ""},
+                            timeout=300.0,
+                        )
                     if response.status_code == 200:
-                        logger.info(f"TAR file uploaded for {order_id}")
+                        logger.info("TAR file uploaded for %s (%.1f MB)", order_id, size_mb)
                         return NotificationResult(
                             status=NotificationStatus.SUCCESS, response_code=200
                         )
+                    last_err = f"HTTP {response.status_code}"
+                    logger.warning(
+                        "Upload attempt %s/%s failed for %s: %s",
+                        attempt + 1, max_attempts, order_id, last_err,
+                    )
                 except Exception as e:
-                    logger.warning(f"Upload attempt {attempt+1}/3 failed for {order_id}: {e}")
-                    if attempt == 2:
-                        raise
+                    last_err = str(e)
+                    # Truncate Cloudflare HTML error pages in logs
+                    if "524" in last_err or "<!DOCTYPE html>" in last_err.lower():
+                        last_err = "Cloudflare/origin timeout (HTTP 524) uploading large archive"
+                    logger.warning(
+                        "Upload attempt %s/%s failed for %s: %s",
+                        attempt + 1, max_attempts, order_id, last_err,
+                    )
+                    if attempt == max_attempts - 1:
+                        break
                     import asyncio
                     await asyncio.sleep(2)
 
-            return NotificationResult(status=NotificationStatus.FAILED, message="Upload failed after retries")
+            return NotificationResult(
+                status=NotificationStatus.FAILED,
+                message=last_err or "Upload failed after retries",
+            )
         except Exception as e:
             logger.error(f"upload_analysis_file failed for {order_id}: {e}")
             return NotificationResult(status=NotificationStatus.FAILED, message=str(e))
