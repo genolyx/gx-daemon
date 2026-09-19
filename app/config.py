@@ -49,6 +49,17 @@ class Settings(BaseSettings):
     # ─── Inbound API protection (optional) ─────────────────
     api_key: Optional[str] = Field(default=None)
 
+    # GX Portal inbound (/v1/*). If unset, API_KEY is accepted.
+    gx_external_api_key: Optional[str] = Field(
+        default=None,
+        description="Bearer key GX Portal sends to GET /v1/order-schema and POST /v1/orders.",
+    )
+    # GX Portal outbound (PDF / failed status callbacks).
+    gx_callback_api_key: Optional[str] = Field(
+        default=None,
+        description="Bearer key this daemon sends to GX callback.report_url / status_url.",
+    )
+
     # ─── Platform API (from nipt-daemon's AWS_API_BASE) ────
     platform_api_base: str = Field(
         default="https://api.genolyx.com",

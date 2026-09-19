@@ -49,6 +49,7 @@ from .platform_client import (
 from .notifier import notify_aws_result, notify_aws_failed, attach_analysis_file, upload_pdf_report
 from .services import load_plugins, get_plugin, list_service_codes, get_all_plugins
 from .services.carrier_screening.prior_reuse import prior_reuse_artifact_roots
+from .gx_portal.router import router as gx_portal_router
 
 logger = logging.getLogger(__name__)
 
@@ -1203,26 +1204,46 @@ app.add_middleware(
     allow_headers=["*"],
 )
 setup_middleware(app)
+app.include_router(gx_portal_router)
 
 # ── Auth middleware ────────────────────────────────────────────
 
 ACCESS_KEY = settings.api_key or ""
+GX_EXTERNAL_KEY = getattr(settings, "gx_external_api_key", None) or ""
 SKIP_PATHS = {"/", "/health", "/test", "/docs", "/redoc", "/openapi.json", "/queue/summary", "/static"}
 SKIP_METHODS = {"OPTIONS"}
 
 
+def _bearer_matches(received: str, key: str) -> bool:
+    if not key:
+        return False
+    return hmac.compare_digest(received, f"Bearer {key}")
+
+
 @app.middleware("http")
 async def access_key_guard(request: Request, call_next):
-    if (request.method in SKIP_METHODS or request.url.path in SKIP_PATHS):
+    path = request.url.path
+    if (request.method in SKIP_METHODS or path in SKIP_PATHS):
         return await call_next(request)
+
+    received = request.headers.get("Authorization", "")
+
+    # GX Portal contract: Bearer only, 401, no api_key query.
+    if path.startswith("/v1/"):
+        keys = [k for k in (GX_EXTERNAL_KEY, ACCESS_KEY) if k]
+        if not keys:
+            return await call_next(request)
+        if any(_bearer_matches(received, k) for k in keys):
+            return await call_next(request)
+        logger.warning("Unauthorized GX /v1 request")
+        return JSONResponse(status_code=401, content={"message": "Unauthorized"})
+
     if not ACCESS_KEY:
         return await call_next(request)
-    expected = f"Bearer {ACCESS_KEY}"
-    received = request.headers.get("Authorization", "")
     api_key = request.headers.get("X-API-Key", "")
     api_key_qp = request.query_params.get("api_key", "")
     if (
-        hmac.compare_digest(received, expected)
+        _bearer_matches(received, ACCESS_KEY)
         or hmac.compare_digest(api_key, ACCESS_KEY)
         or (api_key_qp and hmac.compare_digest(api_key_qp, ACCESS_KEY))
     ):
