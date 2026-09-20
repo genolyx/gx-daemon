@@ -18,6 +18,23 @@ from .platform_client import get_order_detail, get_client_detail, get_client_inf
 
 logger = logging.getLogger(__name__)
 
+
+def _nested_str(obj: Any, *keys: str) -> Optional[str]:
+    """Platform embeds hospital/package as dicts; older objects used attributes."""
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        for key in keys:
+            val = obj.get(key)
+            if val not in (None, ""):
+                return val
+        return None
+    for key in keys:
+        val = getattr(obj, key, None)
+        if val not in (None, ""):
+            return val
+    return None
+
 # 외부 MD 목록 정의
 OTHER_MD_LIST = [
     "1p32-p31 deletion syndrome", "1q41-q42 deletion syndrome", "1q43-q44 deletion syndrome",
@@ -545,6 +562,8 @@ async def make_report_json(
         else:
             logger.warning("No client information found")
 
+        hospital_name = _nested_str(order.hospital, "name", "hospitalName")
+        package_code = _nested_str(order.package, "code")
 
         # 3. 주문 정보 기반 필드 매핑
         report = {
@@ -555,18 +574,18 @@ async def make_report_json(
             "Indication": format_indication(order.indication, order.indicationForTestingSpecify),
             "W": order.gestationalAgeWeeks,
             "D": order.gestationalAgeDays,
-            "Pregnancy Type": str(order.pregnancyType).capitalize(),
+            "Pregnancy Type": str(order.pregnancyType).capitalize() if order.pregnancyType else None,
             "Doctor": order.doctor if order.doctor else None,
-            "Hospital": order.hospital.name if order.hospital else None,
-            "Sample Type": str(order.sampleSpecimenType).capitalize(),
+            "Hospital": hospital_name,
+            "Sample Type": str(order.sampleSpecimenType).capitalize() if order.sampleSpecimenType else None,
             "Sample Number": order.sampleId,
             "Sample ID": order.sampleId,
             "Sample Barcode": order.sampleBarcode, # For Medfield
             "MRN": order.medicalRecordId, # for Medfield
             "Kit ID": order.sequencingBatchId, # for PH
-            "Package": order.package.code,
-            "Resample": str(order.resample).capitalize(), # for PH
-            "Test Requested": order.package.code,
+            "Package": package_code,
+            "Resample": str(order.resample).capitalize() if order.resample else None,
+            "Test Requested": package_code,
             "Report Language": order.reportLanguage,
             "Client Name": client.name if client else None,
         }
@@ -590,8 +609,8 @@ async def make_report_json(
         report["A"] = calculate_age_from_birthdate(order.patientBirth)
         #report["Report Date"] = date.today().strftime("%Y-%m-%d")
         report["Report Date"] = date.today().strftime("%d-%b-%Y")
-        report["TemplateKey"] = order.package.code
-        logger.info(f"TemplateKey : {order.package.code}")
+        report["TemplateKey"] = package_code
+        logger.info(f"TemplateKey : {package_code}")
 
         extracted_data = extract_report_data(review_json, order.showFetalGender)
         report.update(extracted_data)
