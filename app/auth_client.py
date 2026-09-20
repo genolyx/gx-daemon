@@ -378,10 +378,15 @@ class AuthClient:
         """실제 HTTP 요청 수행"""
         token = await self.get_token(force_refresh=force_refresh)
 
-        headers = kwargs.pop("headers", {})
+        headers = dict(kwargs.pop("headers", None) or {})
         headers["Authorization"] = f"Bearer {token}"
+        # Empty or 100-continue Expect → Cloudflare 417 on large POSTs.
+        headers.pop("Expect", None)
 
         timeout = kwargs.pop("timeout", 10.0)
+
+        async def _strip_expect(request: httpx.Request) -> None:
+            request.headers.pop("Expect", None)
 
         # DEBUG_HTTP=true 시 daemon → Platform API 요청/응답 로그
         # 색상 체계: Portal↔daemon 미들웨어와 동일
@@ -401,7 +406,10 @@ class AuthClient:
             log_fn = logger.debug if url.endswith("/status") else logger.info
             log_fn("%s← %s %s%s%s", _R + _OUT, method, url, body_preview, _R)
 
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(
+            timeout=timeout,
+            event_hooks={"request": [_strip_expect]},
+        ) as client:
             response = await client.request(method, url, headers=headers, **kwargs)
 
         if settings.debug_http:

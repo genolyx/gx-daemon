@@ -22,13 +22,17 @@ from .models import (
     ClientDetailResponse, ClientApiResponse,
     PartnerClientResponse, PartnerClientApiResponse,
 )
-from .auth_client import auth_request, get_auth_headers
+from .auth_client import auth_request, get_auth_headers, get_token
 
 logger = logging.getLogger(__name__)
 
 
 class _PresignedUnsupported(Exception):
     """Target API has no POST /file/upload-url (gx-portal, older backends)."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
 
 
 # ─── Order detail / sequencing data (from nipt-daemon aws_client) ──
@@ -437,14 +441,18 @@ class PlatformClient:
         """PUT tar bytes to the S3 presigned URL. No Authorization, no Expect."""
         with open(tar_path, "rb") as f:
             body = f.read()
-        async with httpx.AsyncClient(timeout=300.0) as client:
+
+        async def _strip_expect(request: httpx.Request) -> None:
+            request.headers.pop("Expect", None)
+
+        async with httpx.AsyncClient(
+            timeout=300.0,
+            event_hooks={"request": [_strip_expect]},
+        ) as client:
             response = await client.put(
                 put_url,
                 content=body,
-                headers={
-                    "Content-Type": content_type,
-                    "Expect": None,
-                },
+                headers={"Content-Type": content_type},
             )
         if response.status_code >= 400:
             raise RuntimeError(
@@ -469,25 +477,48 @@ class PlatformClient:
     async def _upload_archive_multipart(
         self, order_id: str, tar_path: str, callback_url: Optional[str] = None
     ) -> None:
-        """Legacy gx-portal / pre-S3 Cloud: POST multipart to /file."""
+        """Legacy gx-portal / pre-S3 Cloud: POST multipart to /file.
+
+        Uses a one-shot httpx POST (not auth_request) so a 48MB upload is not
+        silently retried 3×300s. Expect is omitted — Cloudflare 417.
+        """
         url = f"{self._resolve_base(callback_url)}/analysis/result/{order_id}/file"
+        size_mb = os.path.getsize(tar_path) / (1024 * 1024)
+
+        logger.info("DELETE existing analysis file %s", url)
         try:
-            await auth_request(method="DELETE", url=url, timeout=30.0)
+            await auth_request(method="DELETE", url=url, timeout=15.0)
         except Exception as del_err:
             logger.warning(
                 "DELETE existing analysis file for %s failed (continuing): %s",
                 order_id, del_err,
             )
+
+        logger.info(
+            "POST multipart archive %.1f MB to %s (timeout 120s, no Expect)",
+            size_mb, url,
+        )
+        token = await get_token()
         with open(tar_path, "rb") as f:
-            response = await auth_request(
-                method="POST",
-                url=url,
-                files={"file": (os.path.basename(tar_path), f, "application/x-tar")},
-                headers={"Expect": ""},
-                timeout=300.0,
+            body = f.read()
+
+        async def _strip_expect(request: httpx.Request) -> None:
+            request.headers.pop("Expect", None)
+
+        async with httpx.AsyncClient(
+            timeout=120.0,
+            event_hooks={"request": [_strip_expect]},
+        ) as client:
+            response = await client.post(
+                url,
+                files={"file": (os.path.basename(tar_path), body, "application/x-tar")},
+                headers={"Authorization": f"Bearer {token}"},
             )
-        if response.status_code != 200:
-            raise RuntimeError(f"multipart /file HTTP {response.status_code}")
+        if response.status_code >= 400:
+            preview = (response.text or "")[:200]
+            raise RuntimeError(
+                f"multipart POST {url} HTTP {response.status_code}: {preview}"
+            )
 
     async def _upload_archive_presigned(
         self, order_id: str, tar_path: str, callback_url: Optional[str] = None
@@ -507,23 +538,27 @@ class PlatformClient:
             )
         except httpx.HTTPStatusError as e:
             sc = e.response.status_code if e.response is not None else 0
-            # gx-portal has no this route. Cloud 404 is a real error — do not
-            # remember that as "no presigned" or every later Cloud job hits 417.
-            if sc in (404, 405) and not self._is_cloud_platform(base):
-                self._remember_presigned(base, False)
-                raise _PresignedUnsupported() from e
+            upload_url = f"{base}/analysis/result/{order_id}/file/upload-url"
+            # 404/405 = route not deployed yet (prod Cloud) or gx-portal.
+            # Do not cache False on Cloud — next job should retry S3 after deploy.
+            if sc in (404, 405):
+                if not self._is_cloud_platform(base):
+                    self._remember_presigned(base, False)
+                raise _PresignedUnsupported(
+                    f"POST {upload_url} returned HTTP {sc}"
+                ) from e
             raise
 
         data = (url_resp.json() or {}).get("data") or {}
         put_url = data.get("url")
         content_type = data.get("contentType")
         if not put_url or not content_type:
-            if self._is_cloud_platform(base):
-                raise RuntimeError(
-                    f"upload-url response missing url/contentType: {data}"
-                )
-            self._remember_presigned(base, False)
-            raise _PresignedUnsupported()
+            if not self._is_cloud_platform(base):
+                self._remember_presigned(base, False)
+            raise _PresignedUnsupported(
+                f"POST {base}/analysis/result/{order_id}/file/upload-url "
+                f"returned 200 but data.url/contentType missing"
+            )
         self._remember_presigned(base, True)
         logger.info(
             "Got presigned upload URL for %s key=%s",
@@ -533,11 +568,17 @@ class PlatformClient:
         await self._put_staged_tar(put_url, tar_path, content_type)
         logger.info("S3 PUT succeeded for %s", order_id)
 
+        complete_url = f"{base}/analysis/result/{order_id}/file/complete"
+        logger.info(
+            "POST %s — platform extracts staged tar (timeout 120s)",
+            complete_url,
+        )
         await auth_request(
             method="POST",
-            url=f"{base}/analysis/result/{order_id}/file/complete",
+            url=complete_url,
             timeout=120.0,
         )
+        logger.info("Archive complete succeeded for %s", order_id)
 
     async def upload_analysis_file(
         self, order_id: str, tar_path: str, callback_url: Optional[str] = None
@@ -572,12 +613,10 @@ class PlatformClient:
                             await self._upload_archive_presigned(
                                 order_id, tar_path, callback_url=callback_url
                             )
-                        except _PresignedUnsupported:
-                            if cloud:
-                                raise
-                            logger.info(
-                                "upload-url not available at %s — using multipart /file (gx-portal)",
-                                base,
+                        except _PresignedUnsupported as e:
+                            logger.warning(
+                                "%s — falling back to multipart POST %s/analysis/result/%s/file",
+                                e.reason, base, order_id,
                             )
                             use_presigned = False
                             await self._upload_archive_multipart(
