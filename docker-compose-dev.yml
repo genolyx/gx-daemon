@@ -34,7 +34,9 @@ services:
       - ./app:/app/app
       - ./data/report_templates:/app/data/report_templates:ro
       - ./data/db:/app/data/db:ro
-      - ./data/GX_Report_html:/app/data/GX_Report_html:ro
+      - ./data/templates:/home/ken/gx-daemon/data/templates:ro
+      - ./data/templates:/app/data/templates:ro
+      - ./data/signature:/home/ken/gx-daemon/data/signature:ro
       - ${BASE_DIR:-/data}:/data
       - ${CARRIER_SCREENING_HOST:-/home/ken/gx-exome}:/data/gx-exome
       - ${CARRIER_SCREENING_HOST:-/home/ken/gx-exome}:${CARRIER_SCREENING_HOST:-/home/ken/gx-exome}
@@ -43,6 +45,7 @@ services:
       - ${NIPT_PIPELINE_DIR:-/home/ken/gx-nipt}:${NIPT_PIPELINE_DIR:-/home/ken/gx-nipt}
       - ${NIPT_REF_DIR:-/home/ken/gx-nipt/refs}:${NIPT_REF_DIR:-/home/ken/gx-nipt/refs}:ro
       - /home/ken/ken-nipt/data/refs:/home/ken/ken-nipt/data/refs:ro
+      - /home/ken/ken-nipt/data/bed:/home/ken/ken-nipt/data/bed:ro
       - ${NIPT_ROOT_DIR:-/home/ken/gx-nipt-data}:${NIPT_ROOT_DIR:-/home/ken/gx-nipt-data}
       - ${SGNIPT_SRC_HOST:-/home/ken/sgnipt}:${SGNIPT_SRC_HOST:-/home/ken/sgnipt}:ro
       - ${SGNIPT_LAYOUT_HOST:-/home/ken/sgNIPT}:${SGNIPT_LAYOUT_HOST:-/home/ken/sgNIPT}

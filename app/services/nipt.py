@@ -21,6 +21,7 @@ Completion is declared when ``<output_dir>/<order_id>.json`` exists.
 
 from __future__ import annotations
 
+import csv
 import glob
 import json
 import logging
@@ -34,6 +35,79 @@ from app.config import settings
 from app.models import Job, OutputFile
 
 logger = logging.getLogger(__name__)
+
+
+def _round_ff_display(val: Any) -> Any:
+    """Round Fetal Fraction Review fields to 2 decimals (ken-nipt parity)."""
+    if val in (None, "", "N/A", "NA"):
+        return val
+    try:
+        return round(float(val), 2)
+    except (TypeError, ValueError):
+        return val
+
+
+def _is_empty_risk(val: Any) -> bool:
+    return val in (None, "", "N/A", "NA")
+
+
+def _clamp_maternal_age(age: Any) -> Optional[int]:
+    try:
+        years = int(age)
+    except (TypeError, ValueError):
+        return None
+    return max(25, min(45, years))
+
+
+def _read_risk_before_csv(path: str, age: int, columns: Dict[str, str]) -> Dict[str, str]:
+    """Read age-row values from a tab-separated risk_before CSV."""
+    out: Dict[str, str] = {}
+    try:
+        with open(path, encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f, delimiter="\t")
+            for row in reader:
+                try:
+                    row_age = int(float(str(row.get("Age", "")).strip()))
+                except (TypeError, ValueError):
+                    continue
+                if row_age != age:
+                    continue
+                for item, col in columns.items():
+                    val = (row.get(col) or "").strip()
+                    if val:
+                        out[item] = val
+                break
+    except OSError as e:
+        logger.warning("[nipt] Could not read risk_before CSV %s: %s", path, e)
+    return out
+
+
+def _risk_before_csv_dir(job: Optional[Job]) -> str:
+    params = (job.params if job else {}) or {}
+    ref_dir = (
+        str(params.get("ref_dir") or getattr(settings, "nipt_ref_dir", "") or "")
+    ).strip()
+    labcode = (
+        str(params.get("labcode") or getattr(settings, "nipt_default_labcode", "") or "")
+    ).strip()
+    pipeline_dir = (
+        str(getattr(settings, "nipt_pipeline_dir", "") or "")
+    ).strip() or "/home/ken/gx-nipt"
+
+    candidates = [
+        os.path.join(pipeline_dir, "data", "bed", "common"),
+    ]
+    if ref_dir and labcode:
+        candidates.append(os.path.join(ref_dir, "labs", labcode, "bed", "common"))
+    if ref_dir:
+        candidates.append(os.path.join(ref_dir, "bed", "common"))
+    for directory in candidates:
+        single = os.path.join(directory, "Single_risk_before.csv")
+        twin = os.path.join(directory, "Twin_risk_before.csv")
+        if os.path.isfile(single) and os.path.isfile(twin):
+            return directory
+    logger.warning("[nipt] risk_before CSV not found in: %s", candidates)
+    return ""
 
 
 def apply_nipt_layout_directories(job: Job) -> bool:
@@ -461,7 +535,7 @@ class NIPTPlugin(ServicePlugin):
         """Build analysis_qc section from final_results (pipeline-parity keys)."""
         aqc: Dict[str, Any] = {}
 
-        ff_yff = final_results.get("fetal_fraction_yff")
+        ff_yff = _round_ff_display(final_results.get("fetal_fraction_yff"))
         aqc["fetal_fraction_yff"] = {
             "value": ff_yff,
             "unit": "%",
@@ -469,7 +543,7 @@ class NIPTPlugin(ServicePlugin):
             "threshold": ">4.0%",
         }
 
-        ff_seqff = final_results.get("fetal_fraction_seqff")
+        ff_seqff = _round_ff_display(final_results.get("fetal_fraction_seqff"))
         try:
             ff_seqff_f = float(ff_seqff) if ff_seqff not in (None, "NA", "N/A") else None
         except (TypeError, ValueError):
@@ -529,12 +603,75 @@ class NIPTPlugin(ServicePlugin):
                 block["MD_comment"] = reason
         data["NIPT"] = nipt
 
-    def _enrich_result_json(self, json_path: str, order_id: str) -> None:
-        """Post-process the pipeline JSON to fill empty QC fields.
+    def _fill_risk_before(self, nipt: Dict[str, Any], job: Optional[Job]) -> bool:
+        """Fill T21/T18/T13 risk_before from age CSVs (submit without --fresh)."""
+        rows = nipt.get("trisomy_results")
+        if not isinstance(rows, list) or not rows:
+            return False
+
+        params = (job.params if job else {}) or {}
+        age = _clamp_maternal_age(
+            params.get("patient_age")
+            or params.get("age")
+            or getattr(settings, "nipt_default_age", None)
+        )
+        if age is None:
+            logger.warning("[nipt] Cannot fill risk_before: maternal age missing")
+            return False
+
+        csv_dir = _risk_before_csv_dir(job)
+        if not csv_dir:
+            logger.warning("[nipt] Cannot fill risk_before: CSV dir not found under ref_dir")
+            return False
+
+        single = _read_risk_before_csv(
+            os.path.join(csv_dir, "Single_risk_before.csv"),
+            age,
+            {
+                "T21": "Trisomy_21_risk",
+                "T18": "Trisomy_18_risk",
+                "T13": "Trisomy_13_risk",
+            },
+        )
+        twin = _read_risk_before_csv(
+            os.path.join(csv_dir, "Twin_risk_before.csv"),
+            age,
+            {
+                "T21": "T21_twin_odibo",
+                "T18": "T18_twin_odibo",
+                "T13": "T13_twin_odibo",
+            },
+        )
+        if not single and not twin:
+            return False
+
+        changed = False
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            item = str(row.get("item") or "").strip().upper()
+            if item not in ("T21", "T18", "T13"):
+                continue
+            if _is_empty_risk(row.get("risk_before_single")) and item in single:
+                row["risk_before_single"] = single[item]
+                changed = True
+            if _is_empty_risk(row.get("risk_before_twin")) and item in twin:
+                row["risk_before_twin"] = twin[item]
+                changed = True
+        if changed:
+            nipt["trisomy_results"] = rows
+            logger.info("[nipt] Filled risk_before for T21/T18/T13 from %s (age=%s)", csv_dir, age)
+        return changed
+
+    def _enrich_result_json(
+        self, json_path: str, order_id: str, job: Optional[Job] = None
+    ) -> None:
+        """Post-process the pipeline JSON to fill empty Review fields.
 
         Safety net when sequencing_metrics / analysis_qc were left empty:
         refill from qc.filter.txt (full field set) and sync QC_result from
         the filter ``overall`` row so Portal does not keep a false PASS.
+        Also fills T21/T18/T13 risk_before when submit skipped JSON rebuild.
         """
         try:
             with open(json_path, encoding="utf-8") as f:
@@ -549,6 +686,18 @@ class NIPTPlugin(ServicePlugin):
 
         changed = False
         overall_status: Optional[str] = None
+
+        # Review Final Results Summary: YFF / SEQFF to 2 decimals (ken-nipt parity)
+        for key in ("fetal_fraction_yff", "fetal_fraction_seqff"):
+            if key not in final_results:
+                continue
+            rounded = _round_ff_display(final_results[key])
+            if rounded != final_results[key]:
+                final_results[key] = rounded
+                changed = True
+
+        if self._fill_risk_before(nipt, job):
+            changed = True
 
         # 1. Fill sequencing_metrics from qc.filter.txt if empty
         if not qc.get("sequencing_metrics"):
@@ -613,7 +762,7 @@ class NIPTPlugin(ServicePlugin):
 
             # Post-process: fill empty QC fields from pipeline artifacts
             order_id = (job.order_id or "").strip()
-            self._enrich_result_json(src, order_id)
+            self._enrich_result_json(src, order_id, job=job)
 
             if os.path.abspath(src) != os.path.abspath(dst):
                 shutil.copyfile(src, dst)

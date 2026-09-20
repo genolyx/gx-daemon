@@ -1290,9 +1290,14 @@ def find_client_template_directory(template_dir: str, client_name: str) -> str:
     if not client_name:
         return template_dir
 
-    # 1순위: 클라이언트 이름 그대로 시도
+    def _has_pptx(path: str) -> bool:
+        return os.path.isdir(path) and any(
+            f.endswith(".pptx") for f in os.listdir(path)
+        )
+
+    # 1순위: 클라이언트 이름 그대로 시도 (HTML-only dirs like Genolyx skipped)
     direct_path = os.path.join(template_dir, client_name)
-    if os.path.exists(direct_path):
+    if _has_pptx(direct_path):
         logger.info(f"Found exact match template directory: {direct_path}")
         return direct_path
 
@@ -1300,11 +1305,11 @@ def find_client_template_directory(template_dir: str, client_name: str) -> str:
     if os.path.exists(template_dir):
         for dir_name in os.listdir(template_dir):
             dir_path = os.path.join(template_dir, dir_name)
-            if os.path.isdir(dir_path):
-                # 대소문자 무시하고 부분 매칭
-                if client_name.lower() in dir_name.lower() or dir_name.lower() in client_name.lower():
-                    logger.info(f"Found partial match template directory: {dir_path}")
-                    return dir_path
+            if not _has_pptx(dir_path):
+                continue
+            if client_name.lower() in dir_name.lower() or dir_name.lower() in client_name.lower():
+                logger.info(f"Found partial match template directory: {dir_path}")
+                return dir_path
 
     logger.warning(f"No template directory found for client '{client_name}', using default: {template_dir}")
     return template_dir

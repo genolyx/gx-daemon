@@ -2158,7 +2158,7 @@ async def classify_variants_endpoint(order_id: str, request: Request):
 
 @app.get("/report-assets/genolyx_logo.png")
 async def report_genolyx_logo():
-    """Genolyx logo for sgNIPT report HTML preview (same asset as NIPT GX_Report_html)."""
+    """Genolyx logo for sgNIPT report HTML preview (same asset as NIPT HTML template)."""
     from .services.sgnipt_report import (
         SGNIPT_LOGO_FILENAME,
         _resolve_sgnipt_template_dir,

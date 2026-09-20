@@ -323,10 +323,13 @@ class Settings(BaseSettings):
         default="pptx",
         description="NIPT report engine: 'pptx' (legacy PPTX→PDF) or 'html' (Jinja2 HTML→WeasyPrint PDF)",
     )
-    nipt_report_template_dir: str = Field(default="/home/ken/gx-daemon/data/templates", alias="REPORT_TEMPLATE_DIR")
+    nipt_report_template_dir: str = Field(
+        default="/home/ken/gx-daemon/data/templates",
+        alias="REPORT_TEMPLATE_DIR",
+    )
     nipt_report_html_template_dir: str = Field(
-        default="/app/data/GX_Report_html",
-        description="Directory containing GX_Report_Template.html and assets for HTML engine",
+        default="/app/data/templates/Genolyx",
+        description="Genolyx NIPT HTML template (templates/Genolyx/GX_Report_Template.html)",
     )
     nipt_report_sign_dir: str = Field(default="/home/ken/gx-daemon/data/signature", alias="REPORT_SIGNATURE_DIR")
     remove_bam: bool = Field(default=False, description="Remove BAM files after analysis")
@@ -398,8 +401,17 @@ class Settings(BaseSettings):
 
     @property
     def report_temp_dir(self) -> str:
-        """Backward-compat alias for nipt-daemon."""
-        return self.nipt_report_template_dir
+        """NIPT PPTX templates. Prefer the configured dir if it exists."""
+        configured = (self.nipt_report_template_dir or "").strip()
+        candidates = [
+            configured,
+            "/home/ken/gx-daemon/data/templates",
+            "/app/data/templates",
+        ]
+        for path in candidates:
+            if path and os.path.isdir(path):
+                return path
+        return configured or "/home/ken/gx-daemon/data/templates"
 
     @property
     def report_sign_dir(self) -> str:

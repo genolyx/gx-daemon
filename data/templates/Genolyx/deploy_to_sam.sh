@@ -1,7 +1,7 @@
 #!/bin/bash
 # Sync NIPT report template + sample from gx-daemon to /home/sam/GX_Report_html/
 set -euo pipefail
-SRC="/home/ken/gx-daemon/data/nipt_report_html"
+SRC="/home/ken/gx-daemon/data/templates/Genolyx"
 DST="/home/sam/GX_Report_html"
 install -m 664 "$SRC/GX_Report_Template.html" "$DST/GX_Report_Template.html"
 install -m 664 "$SRC/generate_report.py" "$DST/generate_report.py"

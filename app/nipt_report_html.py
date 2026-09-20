@@ -4,7 +4,7 @@ NIPT HTML Report Generator
 Jinja2 HTML template → WeasyPrint PDF.
 Alternative to the legacy PPTX→LibreOffice PDF pipeline.
 
-Template lives in data/nipt_report_html/GX_Report_Template.html
+Template lives in data/templates/Genolyx/GX_Report_Template.html
 """
 
 import base64
