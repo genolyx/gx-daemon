@@ -154,6 +154,16 @@ def setup_middleware(app):
             log.debug("skip %s %s from %s", request.method, path, peer)
             return response
 
+        if request.method == "POST" and path.rstrip("/").endswith("/submit"):
+            try:
+                raw = await request.body()
+                text = raw.decode("utf-8", errors="replace") if raw else ""
+            except Exception as e:
+                text = f"<unreadable: {e}>"
+            if len(text) > 4000:
+                text = text[:4000] + "…"
+            log.info("submit body %s %s: %s", request.method, path_qs, text or "<empty>")
+
         # ── DEBUG_HTTP: 상세 모드 ────────────────────────────────
         if settings.debug_http:
             body_preview = ""

@@ -1500,17 +1500,42 @@ async def _platform_submit_core(
                     f"'{service_code}'. Registered services: {list_service_codes()}."
                 ),
             )
+        analysis_mode = (dto.analysisMode or "full").strip().lower() or "full"
+        if analysis_mode not in ("full", "algorithm_only"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported analysisMode: {dto.analysisMode!r}",
+            )
+        if analysis_mode == "algorithm_only" and service_code != "nipt":
+            raise HTTPException(
+                status_code=400,
+                detail="analysisMode=algorithm_only is supported for NIPT only",
+            )
+
+        params: Dict[str, Any] = {
+            "platform_submit": True,
+            "sequencing_data_method": dto.sequencingDataMethod,
+            "lab_identifier": dto.labIdentifier,
+            "analysis_mode": analysis_mode,
+        }
+        # Existing BAM → re-run analysis and JSON. Do not use --fresh.
+        if analysis_mode == "algorithm_only":
+            params["algorithm_only"] = True
+            params["_pipeline_no_resume"] = True
+            params["_force"] = True
+            logger.info(
+                "[nipt] Platform submit algorithm_only for %s "
+                "(--algorithm-only --no-resume --force)",
+                order_id,
+            )
+
         work_dir = extract_work_dir(order_id)
         job = Job(
             order_id=order_id,
             service_code=service_code,
             sample_name=order_id,
             work_dir=work_dir,
-            params={
-                "platform_submit": True,
-                "sequencing_data_method": dto.sequencingDataMethod,
-                "lab_identifier": dto.labIdentifier,
-            },
+            params=params,
         )
         # 모든 서비스: background에서 Platform API GET → FASTQ fetch → enqueue
         background.add_task(_enqueue_platform_order, qm, order_id, dto, job)
@@ -1518,6 +1543,7 @@ async def _platform_submit_core(
             "message": "order received",
             "order_id": order_id,
             "lab_identifier": dto.labIdentifier,
+            "analysisMode": analysis_mode,
             "status": "queued",
         }
     except HTTPException:

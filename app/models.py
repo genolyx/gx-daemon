@@ -58,11 +58,14 @@ class SubmitOrderDto(BaseModel):
     - type: 레거시 Cloud/Gx-Portal body 필드 (선택). URL typed submit에서는 무시됨.
 
     임상 정보(patientBirth, sampleBarcode 등)는 Platform API GET으로 가져오므로 body 불필요.
+    - analysisMode: 생략 또는 "full"은 전체 분석. "algorithm_only"는 NIPT만
+      기존 BAM으로 분석·JSON을 다시 만든다.
     """
     sequencingDataMethod: str
     labIdentifier: List[str] = Field(default_factory=list)
     # Legacy Cloud Portal / Gx-Portal may send type="CLIENT" | "nipt" | ...
     type: Optional[str] = None
+    analysisMode: Optional[str] = None
 
     def is_remotedata_client(self) -> bool:
         return self.sequencingDataMethod.lower() == SequencingMethodType.REMOTE.value
