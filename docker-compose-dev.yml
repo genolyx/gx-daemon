@@ -32,6 +32,7 @@ services:
 
     volumes:
       - ./app:/app/app
+      - /home/ken/gx-portal/apps/api/data:/gx-portal-data:ro
       - ./data/report_templates:/app/data/report_templates:ro
       - ./data/db:/app/data/db:ro
       - ./data/templates:/home/ken/gx-daemon/data/templates:ro

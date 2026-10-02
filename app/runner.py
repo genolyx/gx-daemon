@@ -475,8 +475,9 @@ class PipelineRunner:
                 carrier_run_analysis_work_arg(job),
                 carrier_sequencing_folder(job),
             )
-        else:
-            os.makedirs(log_dir, exist_ok=True)
+        # job.log_dir can differ from the FASTQ work segment used above
+        # (portal work_dir 2610 vs fastq/2609/...). Always create the file we open.
+        os.makedirs(log_dir, exist_ok=True)
         
         logger.info(f"[{job.service_code}] Running pipeline, log: {log_file}")
 
@@ -487,6 +488,8 @@ class PipelineRunner:
                 cwd = plugin_cwd
 
         logger.info(f"[{job.service_code}] Pipeline cwd: {cwd}")
+        if cwd:
+            os.makedirs(cwd, exist_ok=True)
 
         log_f = open(log_file, "w")
         try:

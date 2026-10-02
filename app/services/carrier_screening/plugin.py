@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from ..base import ServicePlugin
 from ..wes_panels import (
     interpretation_gene_set_for_job,
+    is_full_wes_panel_id,
     should_apply_interpretation_post_filter,
 )
 from ...config import normalize_legacy_carrier_container_path, settings
@@ -1111,17 +1112,46 @@ class CarrierScreeningPlugin(ServicePlugin):
                     link_path, fq_abs, e,
                 )
 
+    def _capture_panel_record(self, capture_panel_id: str) -> Optional[Dict[str, Any]]:
+        """Portal capture-kit catalog (Twist, Roche HyperExome, …)."""
+        for path in (
+            (os.environ.get("CAPTURE_PANELS_PATH") or "").strip(),
+            "/gx-portal-data/capture_panels.json",
+            "/home/ken/gx-portal/apps/api/data/capture_panels.json",
+        ):
+            if not path or not os.path.isfile(path):
+                continue
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    data = json.load(fh)
+            except (OSError, json.JSONDecodeError):
+                continue
+            for row in data.get("panels") or []:
+                if str(row.get("id") or "").strip() == capture_panel_id:
+                    return row
+        return None
+
     def _resolve_capture_panel_bed(self, capture_panel_id: str) -> Optional[str]:
         """
         capture_panel_id → run_analysis.sh 에 넘길 --backbone-bed 절대 경로.
 
         탐색 순서:
-          1. CARRIER_CAPTURE_PANEL_BED_DIR/{capture_panel_id}/targets.bed  (명시적 설정)
-          2. {CARRIER_SCREENING_SCRIPT_DATA_DIR}/data/bed/{capture_panel_id}/targets.bed  (기본)
+          1. Portal capture kit primary_bed
+          2. CARRIER_CAPTURE_PANEL_BED_DIR/{capture_panel_id}/targets.bed  (명시적 설정)
+          3. {CARRIER_SCREENING_SCRIPT_DATA_DIR}/data/bed/{capture_panel_id}/targets.bed  (기본)
 
         반환값은 HOST 경로 (run_analysis.sh 내부 docker run에서 직접 참조).
         존재하지 않으면 None → --panel 폴백.
         """
+        registered = self._capture_panel_record(capture_panel_id) or {}
+        registered_primary = str(registered.get("primary_bed") or "").strip()
+        if registered_primary and os.path.isfile(registered_primary):
+            logger.info(
+                "[carrier_screening] capture panel BED from catalog: panel=%s path=%s",
+                capture_panel_id, registered_primary,
+            )
+            return registered_primary
+
         data_dir = self._run_analysis_data_dir()
         candidates: List[str] = []
 
@@ -1208,12 +1238,27 @@ class CarrierScreeningPlugin(ServicePlugin):
             "--data-dir", data_dir,
         ]
 
-        # service-daemon 이 BED 경로를 알면 --backbone-bed 로 직접 전달 (패널 관리 주체 명확화)
-        bed_path = self._resolve_capture_panel_bed(capture_panel)
-        if bed_path:
+        # Primary BED (order backbone_bed) overrides the panel targets.bed.
+        # Capture BED is QC-only and must not replace the calling target.
+        explicit_primary = str((job.params or {}).get("backbone_bed") or "").strip()
+        if explicit_primary:
+            bed_path = explicit_primary
             parts += ["--backbone-bed", bed_path]
         else:
-            parts += ["--panel", capture_panel]
+            bed_path = self._resolve_capture_panel_bed(capture_panel)
+            if bed_path:
+                parts += ["--backbone-bed", bed_path]
+            else:
+                parts += ["--panel", capture_panel]
+
+        capture_bed = str((job.params or {}).get("capture_bed") or "").strip()
+        if not capture_bed:
+            registered = self._capture_panel_record(capture_panel) or {}
+            registered_capture = str(registered.get("capture_bed") or "").strip()
+            if registered_capture and os.path.isfile(registered_capture):
+                capture_bed = registered_capture
+        if capture_bed:
+            parts += ["--capture-bed", capture_bed]
 
         parts += [
             "--aligner", "bwa-mem2",
@@ -1221,11 +1266,18 @@ class CarrierScreeningPlugin(ServicePlugin):
             "--no-skip-vep",
             "--skip-cnv",
         ]
+        # Whole Exome (vcf only) only needs the annotated VCF.
+        wes_pid = (job.params or {}).get("wes_panel_id")
+        if not wes_pid and isinstance((job.params or {}).get("carrier"), dict):
+            wes_pid = (job.params or {})["carrier"].get("wes_panel_id")
+        if (job.service_code or "") == "whole_exome" and is_full_wes_panel_id(str(wes_pid or "")):
+            parts.append("--vcf-only")
 
         is_fresh = bool((job.params or {}).get("_pipeline_fresh"))
         logger.info(
-            "[carrier_screening] _shell_command_run_analysis: order=%s sample=%s panel=%s bed=%s bam=%s bam_csv=%s fresh=%s",
+            "[carrier_screening] _shell_command_run_analysis: order=%s sample=%s panel=%s bed=%s capture_bed=%s bam=%s bam_csv=%s fresh=%s",
             job.order_id, sample_folder, capture_panel, bed_path or "(--panel fallback)",
+            capture_bed or "(none)",
             input_bam or "(none)", input_bam_csv or "(none)", is_fresh,
         )
         if input_bam_csv:
@@ -1501,6 +1553,9 @@ class CarrierScreeningPlugin(ServicePlugin):
             )
             if backbone_bed:
                 params["backbone_bed"] = backbone_bed
+            capture_bed = str((job.params or {}).get("capture_bed") or "").strip()
+            if capture_bed:
+                params["capture_bed"] = capture_bed
             for key in ("pon_tar", "target_bed", "disease_bed", "cnv_bed"):
                 if job.params.get(key):
                     params[key] = job.params[key]
@@ -2187,10 +2242,14 @@ class CarrierScreeningPlugin(ServicePlugin):
                 wes_pid = job.params["carrier"].get("wes_panel_id")
             wes_plabel = None
             if wes_pid:
-                from ..wes_panels import get_panel_by_id
+                from ..wes_panels import FULL_WES_PANEL_ID, get_panel_by_id, is_full_wes_panel_id
 
-                _wp = get_panel_by_id(str(wes_pid))
-                wes_plabel = (_wp.get("label") if _wp else None) or None
+                if is_full_wes_panel_id(str(wes_pid)):
+                    wes_plabel = "Whole Exome (vcf only)"
+                    wes_pid = FULL_WES_PANEL_ID
+                else:
+                    _wp = get_panel_by_id(str(wes_pid))
+                    wes_plabel = (_wp.get("label") if _wp else None) or None
 
             _ig_set = interpretation_gene_set_for_job(job)
             _post_applied = should_apply_interpretation_post_filter(job) and bool(_ig_set)

@@ -30,6 +30,11 @@ class WholeExomePlugin(CarrierScreeningPlugin):
                     "prior_order_id is required when reuse_prior_pipeline_outputs is true",
                 )
         wid = _resolve_carrier_wes_panel_id(params)
+        from ..wes_panels import is_full_wes_panel_id
+
+        # Portal "Whole Exome (vcf only)": no catalog gene list.
+        if is_full_wes_panel_id(wid):
+            return True, ""
         # strict=False (Save draft): allow incomplete panel id like carrier_screening.
         if wid and strict:
             from ..wes_panels import get_panel_by_id, resolve_panel_interpretation_genes

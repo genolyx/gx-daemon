@@ -34,3 +34,10 @@ HGMD_*
 # macOS metadata directories (created when unzipping on macOS)
 __MACOSX/
 .DS_Store
+
+# Nextflow runtime left in the repo root (preview/lint)
+.nextflow/
+.nextflow.log
+.nextflow.log.*
+nxf-tmp.*
+dag-*.html

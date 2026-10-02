@@ -373,16 +373,29 @@ def interpretation_gene_set_for_job(job: Any) -> Set[str]:
     return out
 
 
+# Portal Primary (interpretation) sentinel: annotated exome, no gene-panel filter.
+FULL_WES_PANEL_ID = "full_wes"
+
+
+def is_full_wes_panel_id(pid: Optional[str]) -> bool:
+    return (pid or "").strip() == FULL_WES_PANEL_ID
+
+
 def _wes_panel_id_for_job(job: Any) -> str:
     params = getattr(job, "params", None) or {}
     if not isinstance(params, dict):
         return ""
     w = (params.get("wes_panel_id") or "").strip()
+    if is_full_wes_panel_id(w):
+        return ""
     if w:
         return w
     c = params.get("carrier")
     if isinstance(c, dict):
-        return (c.get("wes_panel_id") or "").strip()
+        cid = (c.get("wes_panel_id") or "").strip()
+        if is_full_wes_panel_id(cid):
+            return ""
+        return cid
     return ""
 
 
@@ -556,6 +569,12 @@ def apply_wes_panel_to_job_params(job: Any) -> None:
         pid = job.params["carrier"].get("wes_panel_id")
     pid = (pid or "").strip()
     if not pid:
+        return
+
+    if is_full_wes_panel_id(pid):
+        job.params.pop("panel_interpretation_genes", None)
+        job.params["panel_filter_after_analysis"] = False
+        logger.info("[wes_panels] full_wes: annotated exome, no gene-panel filter")
         return
 
     panel = get_panel_by_id(pid)

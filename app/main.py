@@ -3479,6 +3479,128 @@ async def put_order_variant_knowledge(
     return await asyncio.to_thread(_put_order_variant_knowledge, order_id, job, body, genes)
 
 
+_VCF_WALK_SKIP_DIRS = {
+    "work", ".nextflow", "cnv", "sv", "repeat", "pseudogene", "pgx", "snapshots", "qc", "apoe",
+}
+
+
+def _iter_sample_vcf_files(root: str, max_depth: int = 3):
+    """Yield VCF paths under a sample artifact root, skipping Nextflow work and side products."""
+    base = os.path.abspath(root)
+    for dirpath, dirnames, filenames in os.walk(base):
+        rel_dir = os.path.relpath(dirpath, base)
+        depth = 0 if rel_dir == "." else rel_dir.count(os.sep) + 1
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in _VCF_WALK_SKIP_DIRS and not d.startswith(".")
+        ]
+        if depth >= max_depth:
+            dirnames[:] = []
+        for name in filenames:
+            low = name.lower()
+            if low.endswith(".tbi") or low.endswith(".csi"):
+                continue
+            if low.endswith(".vcf") or low.endswith(".vcf.gz"):
+                yield os.path.join(dirpath, name)
+
+
+def _wes_vcf_kind(path: str) -> Optional[str]:
+    """'annotated' or 'vcf' for the two downloads a vcf-only exome publishes."""
+    base = os.path.basename(path).lower()
+    norm = path.replace("\\", "/").lower()
+    if any(tok in norm for tok in ("/sv/", "/cnv/", "/repeat/", "/pseudogene/")):
+        return None
+    if any(tok in base for tok in ("manta", "cnv", "paraphase", "expansion")):
+        return None
+    if "annotated" in base or base.endswith(".snpeff.vcf"):
+        return "annotated"
+    if "filtered" in base:
+        return "vcf"
+    return None
+
+
+def _rel_under_artifact_roots(path: str, roots: List[str]) -> Optional[str]:
+    try:
+        real = os.path.realpath(path)
+    except OSError:
+        return None
+    for root in roots:
+        try:
+            root_real = os.path.realpath(root)
+        except OSError:
+            continue
+        if real == root_real or real.startswith(root_real + os.sep):
+            rel = os.path.relpath(real, root_real).replace("\\", "/")
+            if rel and not rel.startswith(".."):
+                return rel
+    return None
+
+
+def _pick_published_vcf(paths: List[str]) -> Optional[str]:
+    if not paths:
+        return None
+
+    def rank(path: str):
+        norm = path.replace("\\", "/")
+        published = 0 if "/vcf/" in norm else 1
+        try:
+            mtime = -os.path.getmtime(path)
+        except OSError:
+            mtime = 0
+        return (published, mtime, os.path.basename(path))
+
+    return sorted(paths, key=rank)[0]
+
+
+def locate_wes_vcf_downloads(job: Job) -> Dict[str, Any]:
+    """Called VCF (*_filtered) and VEP annotated VCF for Whole Exome (vcf only)."""
+    roots = _order_artifact_roots(job)
+    found: Dict[str, List[str]] = {"vcf": [], "annotated": []}
+    seen: set = set()
+    for root in roots:
+        for path in _iter_sample_vcf_files(root):
+            try:
+                key = os.path.realpath(path)
+            except OSError:
+                continue
+            if key in seen:
+                continue
+            seen.add(key)
+            kind = _wes_vcf_kind(path)
+            if kind:
+                found[kind].append(path)
+
+    out: Dict[str, Any] = {"vcf": None, "annotated_vcf": None}
+    for kind, key in (("vcf", "vcf"), ("annotated", "annotated_vcf")):
+        chosen = _pick_published_vcf(found[kind])
+        if not chosen:
+            continue
+        rel = _rel_under_artifact_roots(chosen, roots)
+        if not rel:
+            continue
+        try:
+            size = os.path.getsize(chosen)
+        except OSError:
+            size = 0
+        out[key] = {
+            "name": os.path.basename(chosen),
+            "rel_path": rel,
+            "size": size,
+        }
+    return out
+
+
+@app.get("/order/{order_id}/vcf-downloads")
+async def get_order_vcf_downloads(order_id: str):
+    """Locate the called VCF and annotated VCF without loading result.json."""
+    qm = get_queue_manager()
+    job = qm.get_job(order_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Order not found: {order_id}")
+    payload = await asyncio.to_thread(locate_wes_vcf_downloads, job)
+    return JSONResponse(content=payload, headers=_RESULT_JSON_CACHE_HEADERS)
+
+
 @app.get("/order/{order_id}/files")
 async def list_order_files(order_id: str):
     """List output files for an order."""
