@@ -196,15 +196,18 @@ class PipelineRunner:
                         continue
                     job = get_task.result()
 
-                # 서비스 그룹별 슬롯 획득 — 슬롯이 없으면 재큐잉해 다른 서비스 HOL 블로킹 방지
+                # 서비스 그룹별 슬롯 획득 — 슬롯이 없으면 재큐잉해 다른 서비스 HOL 블로킹 방지.
+                # 같은 잡의 대기는 한 번만 로그하고, 이후 재시도는 조용히 1초 간격으로 돈다.
                 acquired = await self._queue_manager.try_acquire_slot(job.service_code)
                 if not acquired:
-                    logger.info(
-                        "Worker-%s: no slot for %s [%s] — requeue",
-                        worker_id, job.order_id, job.service_code,
-                    )
+                    first_wait = job.message != "Waiting for service slot"
                     await self._queue_manager.requeue_for_slot(job)
-                    await asyncio.sleep(0.05)
+                    if first_wait:
+                        logger.info(
+                            "Waiting for slot: %s [%s]",
+                            job.order_id, job.service_code,
+                        )
+                    await asyncio.sleep(1.0)
                     continue
 
                 try:

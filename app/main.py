@@ -26,7 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .config import settings
-from .datetime_kst import now_kst_iso, now_kst_date_compact
+from .datetime_kst import KST, now_kst_iso, now_kst_date_compact
 from .logging_config import setup_logging, setup_middleware, get_log_lines
 from .models import (
     OrderSubmitRequest, OrderSubmitResponse, OrderSaveResponse, OrderStatusResponse,
@@ -3728,6 +3728,105 @@ async def get_order_pipeline_log(
 # ══════════════════════════════════════════════════════════════
 # FASTQ / BAM-CSV BROWSE
 # ══════════════════════════════════════════════════════════════
+
+_FASTQ_UPLOAD_SERVICES = {
+    "sgnipt",
+    "carrier_screening",
+    "carrier",
+    "carrier_couples",
+    "whole_exome",
+    "wes_panel",
+    "health_screening",
+    "health_snp",
+}
+
+
+def _safe_fastq_upload_name(filename: str) -> str:
+    base = os.path.basename((filename or "").replace("\\", "/")).strip()
+    lower = base.lower()
+    suffix = next((s for s in _FASTQ_NAME_SUFFIXES if lower.endswith(s)), "")
+    if not suffix or base.startswith("."):
+        raise HTTPException(
+            status_code=400,
+            detail="FASTQ name must end with .fastq.gz, .fq.gz, .fastq, or .fq",
+        )
+    stem = base[: -len(suffix)]
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._")
+    if not stem or stem in {".", ".."}:
+        raise HTTPException(status_code=400, detail="Invalid FASTQ filename")
+    return stem + base[-len(suffix):]
+
+
+def _unique_fastq_name(directory: str, name: str) -> str:
+    if not os.path.exists(os.path.join(directory, name)):
+        return name
+    lower = name.lower()
+    suffix = next(s for s in _FASTQ_NAME_SUFFIXES if lower.endswith(s))
+    stem = name[: -len(suffix)]
+    orig_suffix = name[-len(suffix):]
+    for n in range(2, 1000):
+        candidate = f"{stem}_{n}{orig_suffix}"
+        if not os.path.exists(os.path.join(directory, candidate)):
+            return candidate
+    raise HTTPException(status_code=409, detail="Too many files with that name")
+
+
+@app.post("/api/fastq/upload")
+async def upload_fastq(
+    request: Request,
+    service_code: str = Query(..., description="carrier_screening | whole_exome | health_screening | sgnipt"),
+    filename: str = Query(..., description="Original file name from the user's computer"),
+):
+    """Stream a FASTQ from the portal into the service FASTQ root (uploads/YYMM/)."""
+    sc = (service_code or "").strip().lower().replace("-", "_")
+    if sc not in _FASTQ_UPLOAD_SERVICES:
+        raise HTTPException(status_code=400, detail=f"Unsupported service for FASTQ upload: {service_code}")
+
+    safe_name = _safe_fastq_upload_name(filename)
+    yymm = datetime.now(KST).strftime("%y%m")
+    rel_dir = f"uploads/{yymm}"
+    dest_dir = _safe_join_under_fastq(rel_dir, sc)
+    os.makedirs(dest_dir, exist_ok=True)
+    final_name = _unique_fastq_name(dest_dir, safe_name)
+    final_path = os.path.join(dest_dir, final_name)
+    tmp_path = final_path + ".partial"
+
+    size = 0
+    try:
+        def _open():
+            return open(tmp_path, "wb")
+
+        fh = await asyncio.to_thread(_open)
+        try:
+            async for chunk in request.stream():
+                if not chunk:
+                    continue
+                await asyncio.to_thread(fh.write, chunk)
+                size += len(chunk)
+        finally:
+            await asyncio.to_thread(fh.close)
+        if size <= 0:
+            raise HTTPException(status_code=400, detail="Empty upload")
+        os.replace(tmp_path, final_path)
+    except HTTPException:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
+    except Exception as exc:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        logger.exception("FASTQ upload failed")
+        raise HTTPException(status_code=500, detail=f"FASTQ upload failed: {exc}") from exc
+
+    rel_path = f"{rel_dir}/{final_name}"
+    return {
+        "abs_path": final_path,
+        "name": final_name,
+        "size": size,
+        "rel_path": rel_path,
+        "service_code": sc,
+    }
+
 
 @app.get("/api/fastq/browse")
 async def browse_fastq_short_path(

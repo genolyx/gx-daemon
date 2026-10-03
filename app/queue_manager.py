@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 
 from .config import settings
 from .datetime_kst import now_kst_iso, now_kst_date_iso, KST
+from .telegram_notify import schedule_order_telegram
 from .models import (
     Job,
     OrderStatus,
@@ -365,6 +366,7 @@ class QueueManager:
             f"(sample: {job.sample_name}, queue_size: {queue_size})"
         )
         await self.persist_job(job)
+        schedule_order_telegram("registered", job)
         return queue_size
 
     def _pack_queue_item(self, job: Job) -> tuple:
@@ -411,12 +413,15 @@ class QueueManager:
                         0, self._stats[job.service_code]["queued"] - 1
                     )
                     cancelled = None
+                    slot_wait = job.message == "Waiting for service slot"
 
             if cancelled is not None:
                 await self.persist_job(cancelled)
                 continue
 
-            await self.persist_job(job)
+            # Slot-wait bounces stay QUEUED. Skip the rewrite on every spin.
+            if not slot_wait:
+                await self.persist_job(job)
             return job
 
     def _semaphore_for(self, service_code: str) -> asyncio.Semaphore:
@@ -452,13 +457,15 @@ class QueueManager:
     async def requeue_for_slot(self, job: Job) -> None:
         """Put a dequeued job back on the queue after a failed try_acquire_slot."""
         async with self._lock:
+            already_waiting = job.message == "Waiting for service slot"
             job.status = OrderStatus.QUEUED
             job.updated_at = now_kst_iso()
             job.message = "Waiting for service slot"
             self._jobs[job.order_id] = job
             self._stats[job.service_code]["queued"] += 1
         await self._queue.put(self._pack_queue_item(job))
-        await self.persist_job(job)
+        if not already_waiting:
+            await self.persist_job(job)
 
     def release_slot(self, service_code: str = ""):
         """서비스 그룹별 실행 슬롯 반환"""
