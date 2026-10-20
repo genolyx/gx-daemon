@@ -656,6 +656,11 @@ def assemble_nipt_delivery_json(
     review_body: Dict[str, Any],
 ) -> Dict[str, Any]:
     """One JSON for a client that receives no PDF: order, analysis, and review."""
+    analysis_copy = copy.deepcopy(analysis)
+    # Pipeline JSON keeps an unused empty OrderInfo slot. The bundle's order
+    # section already carries the Platform order fields.
+    if isinstance(analysis_copy, dict):
+        analysis_copy.pop("OrderInfo", None)
     bundle = {
         "order_id": order_id,
         "generated_at": generated_at,
@@ -664,7 +669,7 @@ def assemble_nipt_delivery_json(
             "name": client.get("name"),
         },
         "order": {key: order.get(key) for key in _BUNDLE_ORDER_KEYS},
-        "analysis": copy.deepcopy(analysis),
+        "analysis": analysis_copy,
         "review": _review_section(review_body),
     }
     redact_nipt_delivery_secrets(bundle)

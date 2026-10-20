@@ -15,6 +15,7 @@ def test_normalize_report_output_defaults_to_pdf():
 
 def test_bundle_keeps_review_and_drops_cutoffs():
     analysis = {
+        "OrderInfo": {},
         "NIPT": {
             "final_results": {"fetal_fraction_seqff": 12.1},
             "trisomy_details": {
@@ -71,10 +72,12 @@ def test_bundle_keeps_review_and_drops_cutoffs():
     assert "wc_threshold_z" not in bundle["analysis"]["NIPT"]["final_results_qc"]
     assert bundle["analysis"]["NIPT"]["quality_control"]["sequencing_metrics"]["mapping_rate"]["threshold"] == ">85%"
 
+    assert "OrderInfo" not in bundle["analysis"]
     assert bundle["client"]["name"] == "PT. Prodia Widyahusada Tbk"
     assert bundle["order"]["Hospital"] == "RSCM"
     assert bundle["review"]["reviewer2"]["Trisomy_result"] == "High Risk"
     assert bundle["review"]["trisomy_result"][0]["item"] == "XYY"
 
     # Source analysis on disk is not rewritten.
+    assert analysis["OrderInfo"] == {}
     assert "Z-score threshold" in analysis["NIPT"]["trisomy_details"]["orig"]["result_table"]["Chromosome 1"]
