@@ -17,6 +17,10 @@ def test_bundle_keeps_review_and_drops_cutoffs():
     analysis = {
         "OrderInfo": {},
         "NIPT": {
+            "review": {
+                "reviewer1": {"Trisomy_result": "", "saved": False},
+                "reviewer2": {"Trisomy_result": "", "saved": False},
+            },
             "final_results": {"fetal_fraction_seqff": 12.1},
             "trisomy_details": {
                 "orig": {
@@ -73,6 +77,7 @@ def test_bundle_keeps_review_and_drops_cutoffs():
     assert bundle["analysis"]["NIPT"]["quality_control"]["sequencing_metrics"]["mapping_rate"]["threshold"] == ">85%"
 
     assert "OrderInfo" not in bundle["analysis"]
+    assert "review" not in bundle["analysis"]["NIPT"]
     assert bundle["client"]["name"] == "PT. Prodia Widyahusada Tbk"
     assert bundle["order"]["Hospital"] == "RSCM"
     assert bundle["review"]["reviewer2"]["Trisomy_result"] == "High Risk"
@@ -80,4 +85,5 @@ def test_bundle_keeps_review_and_drops_cutoffs():
 
     # Source analysis on disk is not rewritten.
     assert analysis["OrderInfo"] == {}
+    assert "review" in analysis["NIPT"]
     assert "Z-score threshold" in analysis["NIPT"]["trisomy_details"]["orig"]["result_table"]["Chromosome 1"]
