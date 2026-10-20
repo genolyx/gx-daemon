@@ -2583,16 +2583,80 @@ async def generate_report_from_html(order_id: str, request: Request):
     })
 
 
+def _report_output_mode(request: Request) -> str:
+    from .report_functions import normalize_report_output
+
+    try:
+        return normalize_report_output(request.query_params.get("output"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _load_nipt_analysis_document(order_id: str) -> tuple:
+    """Pipeline analysis JSON and the order output directory."""
+    work_dir = extract_work_dir(order_id)
+    output_dir = os.path.join(settings.nipt_output_dir, work_dir, order_id)
+    primary = os.path.join(output_dir, f"{order_id}.json")
+    fallback = os.path.join(output_dir, "result.json")
+    path = primary if os.path.isfile(primary) else fallback
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail=f"Analysis JSON not found: {primary}")
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=500, detail=f"Analysis JSON is not an object: {path}")
+    return data, output_dir
+
+
+async def _generate_nipt_json_delivery(order_id: str, body: Dict[str, Any]):
+    """Return one redacted JSON bundle. No PPTX and no PDF upload."""
+    from .report_functions import build_nipt_delivery_json
+
+    logger.info(f"Generating NIPT JSON delivery for order {order_id}")
+    analysis, output_dir = _load_nipt_analysis_document(order_id)
+    qm = get_queue_manager()
+    cached_job = qm.get_job(order_id)
+    cached_order_detail = (
+        cached_job.params.get("platform_order_detail") if cached_job else None
+    )
+    bundle = await build_nipt_delivery_json(
+        order_id,
+        body if isinstance(body, dict) else {},
+        analysis,
+        cached_order_detail=cached_order_detail,
+    )
+    os.makedirs(output_dir, exist_ok=True)
+    bundle_path = os.path.join(output_dir, f"{order_id}.bundle.json")
+    with open(bundle_path, "w", encoding="utf-8") as f:
+        json.dump(bundle, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    logger.info(f"NIPT JSON delivery written for {order_id}: {bundle_path}")
+    return JSONResponse(
+        content=bundle,
+        headers={"Content-Disposition": f'attachment; filename="{order_id}.bundle.json"'},
+    )
+
+
 @app.post("/analysis/order/{order_id}/report")
 async def platform_generate_report(order_id: str, request: Request):
     """Generate report and upload to Platform (nipt-daemon compatible).
 
     NIPT uses the dedicated ``/nipt-report`` flow (not plugin.generate_report).
+
+    ``?output=pdf`` (default) builds a PDF. ``?output=json`` returns one JSON
+    bundle and does not render a PDF. JSON output is implemented for NIPT.
     """
+    output_mode = _report_output_mode(request)
     qm = get_queue_manager()
     job = qm.get_job(order_id)
     if not job:
         raise HTTPException(404, f"Order not found: {order_id}")
+
+    if output_mode == "json" and job.service_code != "nipt":
+        raise HTTPException(
+            status_code=400,
+            detail="output=json is supported for NIPT only",
+        )
 
     if job.service_code == "nipt":
         return await generate_nipt_report(order_id, request)
@@ -2981,9 +3045,16 @@ async def generate_nipt_report(order_id: str, request: Request):
     """
     Generate NIPT report and upload to Platform.
     Engine is selected via NIPT_REPORT_ENGINE env var: 'pptx' (default) or 'html'.
+
+    ``?output=json`` writes ``{order_id}.bundle.json`` and returns that document
+    instead of rendering a PDF.
     """
+    output_mode = _report_output_mode(request)
     try:
         body = await request.json()
+        if output_mode == "json":
+            return await _generate_nipt_json_delivery(order_id, body)
+
         engine = (body.get("engine") or settings.nipt_report_engine).strip().lower()
         logger.info(f"Generating NIPT report for order {order_id} [engine={engine}]")
 

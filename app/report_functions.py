@@ -1,3 +1,4 @@
+import copy
 import os
 import re
 import logging
@@ -13,7 +14,8 @@ from pptx.dml.color import RGBColor
 from pptx.util import Pt
 
 from .config import settings
-from .models import OrderDetailResponse
+from .datetime_kst import now_kst_iso
+from .models import ClientDetailResponse, OrderDetailResponse
 from .platform_client import get_order_detail, get_client_detail, get_client_info, extract_work_dir
 
 logger = logging.getLogger(__name__)
@@ -524,6 +526,186 @@ def extract_report_data(body, show_gender="Yes"):
     }
 
 
+# Cutoffs that must not leave the daemon in a client JSON deliverable.
+# Measured values (Z-score, UAR(%)) stay. Sequencing QC pass lines named
+# "threshold" are a different field and are kept.
+_NIPT_DELIVERY_REDACT_KEYS = frozenset({
+    "Z-score threshold",
+    "UAR threshold",
+    "zscore_threshold",
+    "wc_threshold_z",
+})
+
+_BUNDLE_ORDER_KEYS = (
+    "Order ID",
+    "Patient Name",
+    "kg",
+    "cm",
+    "Indication",
+    "W",
+    "D",
+    "Pregnancy Type",
+    "Doctor",
+    "Hospital",
+    "Sample Type",
+    "Sample Number",
+    "Sample ID",
+    "Sample Barcode",
+    "MRN",
+    "Kit ID",
+    "Package",
+    "Resample",
+    "Test Requested",
+    "Report Language",
+    "DOB",
+    "Collection Date",
+    "Receipt Date",
+    "A",
+    "Report Date",
+)
+
+
+def normalize_report_output(value: Optional[str]) -> str:
+    """Report deliverable from ``?output=``. Missing means the existing PDF path."""
+    raw = (value or "pdf").strip().lower()
+    if raw not in ("pdf", "json"):
+        raise ValueError("output must be 'pdf' or 'json'")
+    return raw
+
+
+def redact_nipt_delivery_secrets(node: Any) -> None:
+    """Drop algorithm cutoff keys in place."""
+    if isinstance(node, dict):
+        for key in list(node.keys()):
+            if key in _NIPT_DELIVERY_REDACT_KEYS:
+                del node[key]
+            else:
+                redact_nipt_delivery_secrets(node[key])
+    elif isinstance(node, list):
+        for item in node:
+            redact_nipt_delivery_secrets(item)
+
+
+def build_report_order_fields(
+    order: OrderDetailResponse,
+    client: Optional[ClientDetailResponse],
+) -> Dict[str, Any]:
+    """Order and client display fields shared by the PPTX report and the JSON bundle."""
+    hospital_name = _nested_str(order.hospital, "name", "hospitalName")
+    package_code = _nested_str(order.package, "code")
+    report = {
+        "Order ID": order.id,
+        "Patient Name": order.patientName,
+        "kg": order.weight,
+        "cm": order.height,
+        "Indication": format_indication(order.indication, order.indicationForTestingSpecify),
+        "W": order.gestationalAgeWeeks,
+        "D": order.gestationalAgeDays,
+        "Pregnancy Type": str(order.pregnancyType).capitalize() if order.pregnancyType else None,
+        "Doctor": order.doctor if order.doctor else None,
+        "Hospital": hospital_name,
+        "Sample Type": str(order.sampleSpecimenType).capitalize() if order.sampleSpecimenType else None,
+        "Sample Number": order.sampleId,
+        "Sample ID": order.sampleId,
+        "Sample Barcode": order.sampleBarcode,
+        "MRN": order.medicalRecordId,
+        "Kit ID": order.sequencingBatchId,
+        "Package": package_code,
+        "Resample": str(order.resample).capitalize() if order.resample else None,
+        "Test Requested": package_code,
+        "Report Language": order.reportLanguage,
+        "Client Name": client.name if client else None,
+    }
+    report["DOB"] = (
+        datetime.fromisoformat(order.patientBirth.replace("Z", "+00:00")).strftime("%d-%b-%Y")
+        if order.patientBirth else "-"
+    )
+    report["Collection Date"] = (
+        datetime.fromisoformat(order.sampleCollectedAt.replace("Z", "+00:00")).strftime("%d-%b-%Y")
+        if order.sampleCollectedAt else "-"
+    )
+    report["Receipt Date"] = (
+        datetime.fromisoformat(order.receiptDate.replace("Z", "+00:00")).strftime("%d-%b-%Y")
+        if order.receiptDate else "-"
+    )
+    report["A"] = calculate_age_from_birthdate(order.patientBirth)
+    report["Report Date"] = date.today().strftime("%d-%b-%Y")
+    return report
+
+
+def _review_section(review_body: Dict[str, Any]) -> Dict[str, Any]:
+    nipt = review_body.get("NIPT") if isinstance(review_body, dict) else None
+    if not isinstance(nipt, dict):
+        nipt = {}
+    review = nipt.get("review") if isinstance(nipt.get("review"), dict) else {}
+    section = {
+        "reviewer1": review.get("reviewer1") or {},
+        "reviewer2": review.get("reviewer2") or {},
+    }
+    section.update(extract_trisomy_and_md_data(review_body if isinstance(review_body, dict) else {}))
+    return section
+
+
+def assemble_nipt_delivery_json(
+    order_id: str,
+    *,
+    generated_at: str,
+    client: Dict[str, Any],
+    order: Dict[str, Any],
+    analysis: Dict[str, Any],
+    review_body: Dict[str, Any],
+) -> Dict[str, Any]:
+    """One JSON for a client that receives no PDF: order, analysis, and review."""
+    bundle = {
+        "order_id": order_id,
+        "generated_at": generated_at,
+        "client": {
+            "id": client.get("id"),
+            "name": client.get("name"),
+        },
+        "order": {key: order.get(key) for key in _BUNDLE_ORDER_KEYS},
+        "analysis": copy.deepcopy(analysis),
+        "review": _review_section(review_body),
+    }
+    redact_nipt_delivery_secrets(bundle)
+    return bundle
+
+
+async def _resolve_order_and_client(
+    order_id: str,
+    cached_order_detail: Optional[Dict[str, Any]] = None,
+) -> tuple:
+    if cached_order_detail:
+        try:
+            order = OrderDetailResponse(**cached_order_detail)
+            logger.debug(f"Using cached order detail for {order_id}")
+        except Exception:
+            order = await get_order_detail(order_id)
+    else:
+        order = await get_order_detail(order_id)
+    client = await get_client_info(order)
+    return order, client
+
+
+async def build_nipt_delivery_json(
+    order_id: str,
+    review_body: Dict[str, Any],
+    analysis: Dict[str, Any],
+    cached_order_detail: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Build the client JSON bundle at report time."""
+    order, client = await _resolve_order_and_client(order_id, cached_order_detail)
+    fields = build_report_order_fields(order, client)
+    client_id = client.id if client else order.clientId
+    return assemble_nipt_delivery_json(
+        order_id,
+        generated_at=now_kst_iso(),
+        client={"id": client_id, "name": fields.get("Client Name")},
+        order=fields,
+        analysis=analysis,
+        review_body=review_body,
+    )
+
 
 async def make_report_json(
     order_id: str,
@@ -538,77 +720,18 @@ async def make_report_json(
     logger.info(f"Creating report JSON for order: {order_id}")
 
     try:
-        # 1. 주문 상세 정보 — 캐시 우선, 없으면 Platform API 호출
-        if cached_order_detail:
-            try:
-                order = OrderDetailResponse(**cached_order_detail)
-                logger.debug(f"Using cached order detail for {order_id}")
-            except Exception:
-                order = await get_order_detail(order_id)
-        else:
-            order = await get_order_detail(order_id)
+        order, client = await _resolve_order_and_client(order_id, cached_order_detail)
         logger.debug(f"Retrieved order details for {order_id}")
         logger.info(order)
-
-        # Indication 필드 디버깅 로그
         logger.info(f"[make_report_json] Order {order_id} - order.indication value: {order.indication}")
         logger.info(f"[make_report_json] Order {order_id} - order.indication type: {type(order.indication)}")
-
-        # 2. 클라이언트 정보 조회 (우선순위: clientId > partnerId > package.clientId)
-        client = await get_client_info(order)
-
         if client:
             logger.debug(f"Retrieved client details: {client.name}")
         else:
             logger.warning("No client information found")
 
-        hospital_name = _nested_str(order.hospital, "name", "hospitalName")
-        package_code = _nested_str(order.package, "code")
-
-        # 3. 주문 정보 기반 필드 매핑
-        report = {
-            "Order ID": order.id,
-            "Patient Name": order.patientName,
-            "kg": order.weight,
-            "cm": order.height,
-            "Indication": format_indication(order.indication, order.indicationForTestingSpecify),
-            "W": order.gestationalAgeWeeks,
-            "D": order.gestationalAgeDays,
-            "Pregnancy Type": str(order.pregnancyType).capitalize() if order.pregnancyType else None,
-            "Doctor": order.doctor if order.doctor else None,
-            "Hospital": hospital_name,
-            "Sample Type": str(order.sampleSpecimenType).capitalize() if order.sampleSpecimenType else None,
-            "Sample Number": order.sampleId,
-            "Sample ID": order.sampleId,
-            "Sample Barcode": order.sampleBarcode, # For Medfield
-            "MRN": order.medicalRecordId, # for Medfield
-            "Kit ID": order.sequencingBatchId, # for PH
-            "Package": package_code,
-            "Resample": str(order.resample).capitalize() if order.resample else None,
-            "Test Requested": package_code,
-            "Report Language": order.reportLanguage,
-            "Client Name": client.name if client else None,
-        }
-
-        # 3. 계산된 필드 추가
-        report["DOB"] = (
-            datetime.fromisoformat(order.patientBirth.replace("Z", "+00:00")).strftime("%d-%b-%Y")
-            if order.patientBirth else "-"
-        )
-
-        report["Collection Date"] = (
-            datetime.fromisoformat(order.sampleCollectedAt.replace("Z", "+00:00")).strftime("%d-%b-%Y")
-            if order.sampleCollectedAt else "-"
-        )
-
-        report["Receipt Date"] = (
-            datetime.fromisoformat(order.receiptDate.replace("Z", "+00:00")).strftime("%d-%b-%Y")
-            if order.receiptDate else "-"
-        )
-
-        report["A"] = calculate_age_from_birthdate(order.patientBirth)
-        #report["Report Date"] = date.today().strftime("%Y-%m-%d")
-        report["Report Date"] = date.today().strftime("%d-%b-%Y")
+        report = build_report_order_fields(order, client)
+        package_code = report.get("Package")
         report["TemplateKey"] = package_code
         logger.info(f"TemplateKey : {package_code}")
 
