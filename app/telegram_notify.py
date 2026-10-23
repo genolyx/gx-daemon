@@ -31,7 +31,7 @@ _SERVICE_LABELS = {
 }
 
 _STATUS_LABELS = {
-    "registered": "Registered",
+    "registered": "Ready",
     "started": "In-Analysis",
     "completed": "Completed",
     "failed": "Failed",

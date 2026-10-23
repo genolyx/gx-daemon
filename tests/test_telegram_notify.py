@@ -16,7 +16,7 @@ def _job(service_code: str, order_id: str = "GNMF26100001", **kwargs) -> Job:
 
 def test_service_status_lines():
     assert format_order_message("registered", _job("nipt")) == (
-        "[NIPT]\nGNMF26100001 - Registered"
+        "[NIPT]\nGNMF26100001 - Ready"
     )
     assert format_order_message("started", _job("whole_exome", "WEGX26100001")) == (
         "[WES]\nWEGX26100001 - In-Analysis"
